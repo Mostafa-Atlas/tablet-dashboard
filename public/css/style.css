@@ -8,13 +8,13 @@ body{margin:0;background:radial-gradient(1200px 600px at 50% -10%,#15151d 0%,var
 #app{min-height:100dvh;display:flex;flex-direction:column}
 /* topbar */
 #topbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 22px;font-size:22px;border-bottom:1px solid var(--line);background:rgba(17,17,22,.9);backdrop-filter:blur(6px)}
-.sound-strip,.alarm-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 20px;font-size:14px}
-.sound-strip{background:#142338;color:#d6e5ff}
-.sound-strip button,.alarm-actions button{min-height:44px;padding:8px 16px;border-radius:10px;border:1px solid #8ab4ff;background:#203d69;color:#fff;font:inherit;font-weight:700;cursor:pointer}
+.alarm-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 20px;font-size:14px}
+.alarm-actions button{min-height:44px;padding:8px 16px;border-radius:10px;border:1px solid #8ab4ff;background:#203d69;color:#fff;font:inherit;font-weight:700;cursor:pointer}
 .alarm-banner{background:#40241b;border-bottom:2px solid var(--warn);color:#fff;position:sticky;top:0;z-index:20;box-shadow:0 8px 24px #0008}
 .alarm-banner strong{display:block;font-size:20px}.alarm-banner span{font-size:14px;color:#ffd2a1}
 .alarm-actions{display:flex;gap:8px;flex-wrap:wrap}
 .alarm-actions button{border-color:var(--warn);background:#583111}
+.alarm-actions #alarm-enable{border-color:#8ab4ff;background:#203d69}
 #clock{font-weight:800;font-size:32px;margin-right:14px;font-variant-numeric:tabular-nums}
 #date{color:var(--dim)}
 .tb-right{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
@@ -24,6 +24,7 @@ body{margin:0;background:radial-gradient(1200px 600px at 50% -10%,#15151d 0%,var
 .pill.bad{background:rgba(255,93,93,.12);color:var(--bad);border:1px solid rgba(255,93,93,.4)}
 /* layout */
 #grid{flex:1;display:grid;grid-template-columns:minmax(0,1.2fr) minmax(280px,1fr) minmax(260px,.85fr);gap:14px;padding:14px;align-items:start;align-content:start}
+#life-column{display:flex;flex-direction:column;gap:14px;min-width:0}
 .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:18px;display:flex;flex-direction:column;min-width:0;box-shadow:0 8px 28px rgba(0,0,0,.35)}
 .card h2{margin:0 0 10px;font-size:15px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#bfc4d0}
 .card h2.left{text-align:left}
@@ -108,10 +109,9 @@ body.large-text .timer-name{font-size:19px}
 body.focus #pc-card{display:none}
 body.focus #grid{grid-template-columns:minmax(0,1.2fr) minmax(280px,1fr)}
 @media (min-width:1101px){
-  body:not(.focus) #life-card{grid-column:1;grid-row:1 / span 2}
+  body:not(.focus) #life-column{grid-column:1;grid-row:1 / span 2}
   body:not(.focus) #timer-card{grid-column:2;grid-row:1}
   body:not(.focus) #pc-card{grid-column:3;grid-row:1}
-  body:not(.focus) #note-section{grid-column:2;grid-row:2}
   body:not(.focus) #routine-section{grid-column:3;grid-row:2}
 }
 @media (max-width:1100px){
@@ -125,7 +125,7 @@ body.focus #grid{grid-template-columns:minmax(0,1.2fr) minmax(280px,1fr)}
   #topbar{padding:12px 16px}
   #date,#weather{font-size:16px}
 }
-@media (max-width:600px){.alarm-banner,.sound-strip{align-items:stretch;flex-direction:column}.alarm-actions button{flex:1}}
+@media (max-width:600px){.alarm-banner{align-items:stretch;flex-direction:column}.alarm-actions button{flex:1}}
 @media (prefers-reduced-motion:reduce){
   .timer.fired{animation:none}
   .bar i{transition:none}

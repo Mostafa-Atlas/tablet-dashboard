@@ -21,22 +21,24 @@
   </header>
 
   <div id="alarm-banner" class="alarm-banner" role="alert" hidden>
-    <div><strong id="alarm-title">Reminder</strong><span id="alarm-detail"></span></div>
-    <div class="alarm-actions"><button id="alarm-snooze" type="button">Snooze 5 min</button><button id="alarm-dismiss" type="button">Dismiss</button></div>
+    <div><strong id="alarm-title">Reminder</strong><span id="alarm-detail"></span><span id="alarm-sound-help" hidden> · Sound blocked by browser</span></div>
+    <div class="alarm-actions"><button id="alarm-enable" type="button" hidden>Enable sound</button><button id="alarm-snooze" type="button">Snooze 5 min</button><button id="alarm-dismiss" type="button">Dismiss</button></div>
   </div>
-  <div id="sound-strip" class="sound-strip"><span id="sound-status">Tap once to enable alarm sound on this tablet</span><button id="sound-enable" type="button">Enable sound</button></div>
 
   <main id="grid">
-    <section class="card" id="life-card">
-      <div id="today-section">
-        <h2>Today</h2>
-        <div id="event" class="tl-wrap"><span class="dim">Loading…</span></div>
-      </div>
-      <div id="todo-section">
-        <h2 class="mt">To-Do</h2>
-        <ul id="todos"><li class="dim">Loading…</li></ul>
-      </div>
-    </section>
+    <div id="life-column">
+      <section class="card" id="note-section" hidden><h2>Pinned note</h2><p id="pinned-note"></p></section>
+      <section class="card" id="life-card">
+        <div id="today-section">
+          <h2>Today</h2>
+          <div id="event" class="tl-wrap"><span class="dim">Loading…</span></div>
+        </div>
+        <div id="todo-section">
+          <h2 class="mt">To-Do</h2>
+          <ul id="todos"><li class="dim">Loading…</li></ul>
+        </div>
+      </section>
+    </div>
 
     <section class="card center" id="timer-card">
       <h2 class="left">Timers</h2>
@@ -53,7 +55,6 @@
       <div id="disks"><div class="dim sub">Waiting for agent…</div></div>
       <div class="sub dim" id="pc-age"></div>
     </section>
-    <section class="card" id="note-section" hidden><h2>Pinned note</h2><p id="pinned-note"></p></section>
     <section class="card" id="routine-section" hidden><h2>Routine</h2><div id="routines"></div></section>
   </main>
 </div>

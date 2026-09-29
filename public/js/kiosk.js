@@ -331,7 +331,8 @@ function renderRoutines(routines) {
     card.appendChild(list); box.appendChild(card);
   });
 }
-let soundEnabled = false, soundContext = null, customSound = false, fallbackLoop = null;
+let soundContext = null, fallbackLoop = null, soundAttempt = 0, customSoundFailed = false;
+const customSoundReady = fetch('/audio/alarm.mp3', { method: 'HEAD' }).then(r => r.ok).catch(() => false);
 let currentAlarm = null;
 const alarmMemory = (() => { try { return JSON.parse(localStorage.getItem('dashboard-alarms') || '{}'); } catch { return {}; } })();
 function saveAlarmMemory() { try { localStorage.setItem('dashboard-alarms', JSON.stringify(alarmMemory)); } catch {} }
@@ -346,31 +347,52 @@ function chime() {
   oscillator.start(); oscillator.stop(soundContext.currentTime + 0.5);
 }
 function stopAlarmSound() {
+  soundAttempt++;
   $('alarm-audio').pause(); $('alarm-audio').currentTime = 0;
   if (fallbackLoop) clearInterval(fallbackLoop);
   fallbackLoop = null;
 }
-async function startAlarmSound() {
-  if (!soundEnabled || !currentAlarm) return;
-  stopAlarmSound();
-  if (customSound) {
-    try { await $('alarm-audio').play(); return; } catch { customSound = false; }
-  }
-  chime(); fallbackLoop = setInterval(chime, 2500);
+function showSoundRecovery(show) {
+  $('alarm-enable').hidden = !show;
+  $('alarm-sound-help').hidden = !show;
 }
-$('alarm-audio').onerror = () => { if (currentAlarm && soundEnabled && !fallbackLoop) { customSound = false; startAlarmSound(); } };
-$('sound-enable').onclick = async () => {
+function within(promise, ms) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Audio start timed out')), ms);
+    Promise.resolve(promise).then(value => { clearTimeout(timer); resolve(value); }, error => { clearTimeout(timer); reject(error); });
+  });
+}
+async function startAlarmSound() {
+  if (!currentAlarm) return;
+  stopAlarmSound();
+  const attempt = soundAttempt, alarmId = currentAlarm.id;
+  const stale = () => attempt !== soundAttempt || currentAlarm?.id !== alarmId;
+  let resume = null;
   try {
-    soundContext ||= new (window.AudioContext || window.webkitAudioContext)();
-    await soundContext.resume();
-    soundEnabled = true;
-    customSound = (await fetch('/audio/alarm.mp3', { method: 'HEAD' })).ok;
-    $('sound-status').textContent = customSound ? 'Alarm sound enabled' : 'Built-in chime enabled';
-    $('sound-enable').hidden = true;
-    chime();
-    if (currentAlarm) startAlarmSound();
-  } catch { $('sound-status').textContent = 'Sound blocked. Tap Enable sound again or check tablet volume.'; }
-};
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (AudioContextClass) soundContext ||= new AudioContextClass();
+    if (soundContext?.state === 'suspended') resume = soundContext.resume().catch(() => {});
+  } catch { /* the custom MP3 can still play without Web Audio */ }
+  if (await customSoundReady && !customSoundFailed) {
+    if (stale()) return;
+    try {
+      await within($('alarm-audio').play(), 1200);
+      if (stale()) { $('alarm-audio').pause(); return; }
+      showSoundRecovery(false);
+      return;
+    } catch (error) {
+      if (error.name !== 'NotAllowedError') customSoundFailed = true;
+      $('alarm-audio').pause();
+    }
+  }
+  if (resume) await Promise.race([resume, new Promise(resolve => setTimeout(resolve, 400))]);
+  if (stale()) return;
+  if (soundContext?.state === 'running') {
+    chime(); fallbackLoop = setInterval(chime, 2500); showSoundRecovery(false);
+  } else showSoundRecovery(true);
+}
+$('alarm-audio').onerror = () => { customSoundFailed = true; if (currentAlarm && !fallbackLoop) startAlarmSound(); };
+$('alarm-enable').onclick = () => startAlarmSound();
 function updateAlarms() {
   const now = Date.now();
   const candidates = [];
@@ -383,6 +405,7 @@ function updateAlarms() {
   if (next?.id === currentAlarm?.id) return;
   stopAlarmSound(); currentAlarm = next || null;
   $('alarm-banner').hidden = !next;
+  showSoundRecovery(false);
   if (next) {
     $('alarm-title').textContent = next.name;
     $('alarm-detail').textContent = next.detail;

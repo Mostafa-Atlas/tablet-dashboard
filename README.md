@@ -53,12 +53,12 @@ Use Fully Kiosk Browser or Chrome. Set the start URL to `http://<lab-ip>:1200/` 
 - Portrait and narrow widths use a single column; landscape uses two or three columns based on available width.
 - In `/admin` → **Tablet display**, choose text size, visible sections, calendar privacy, and quiet hours. Quiet hours dim the page on the tablet according to the tablet's local time.
 - **DASHBOARD LIVE** reports the server stream. **RECONNECTING** means the display is waiting for it. **PC ONLINE/OFFLINE** separately reports agent freshness.
-- On each fresh tablet page load, tap **Enable sound** and keep the tablet volume up. The dashboard shows a visible alert if audio has not been enabled. **Snooze 5 min** and **Dismiss** act on that tablet.
+- Alarm sound is on by default: the tablet tries to play it when a task is due or a timer finishes. Keep the tablet's media volume up. If the browser blocks automatic playback, **Enable sound** appears inside the alarm. **Snooze 5 min** and **Dismiss** act on that tablet.
 
 ## Use `/admin`
 
 - **To-do:** add, rename, complete, delete, and move tasks up or down. Set **High**, **Normal**, or **Low** priority, with an optional due date for one-time tasks or time and weekday for repeating tasks. Due tasks appear alongside calendar events in **Today**, with a countdown and alarm. The other incomplete tasks appear below, with high priorities first. Daily tasks reset at the next Cairo calendar day; weekly tasks reset on Monday in Cairo time.
-- **Pinned note:** write and save a note from `/admin` on your phone or PC. It updates on the tablet immediately.
+- **Pinned note:** write and save a note from `/admin` on your phone or PC. It updates immediately above the tablet's Today/calendar section.
 - **Routine checklists:** create daily or weekly routines, add steps, and check them off from `/admin`. The tablet shows the steps and progress; checks reset at the next Cairo day or week.
 - **Timers:** create a long timer by number of days or target date. Create a short timer by duration, clock time, or a 25-minute, 1-hour, or 2-hour preset. The form previews its end time. Existing timers can be renamed, given a new end time or color, paused, resumed, restarted when eligible, marked done, or deleted. Finished timers pulse for 30 seconds.
 - **Dashboard time:** shift only the kiosk clock for display. Timers still use real time.
@@ -70,9 +70,9 @@ Use Fully Kiosk Browser or Chrome. Set the start URL to `http://<lab-ip>:1200/` 
 1. Name your audio file exactly `alarm.mp3` (MP3 format; a short 5–15 second clip works well).
 2. Copy it to `public/audio/alarm.mp3` in this project. On the Windows checkout this is `E:\Projects\Tablet dashbaord\public\audio\alarm.mp3`.
 3. If running with Docker, run `docker compose up -d --build` so the file is copied into the image. If running directly with Node, no rebuild is needed.
-4. Reload the tablet dashboard, tap **Enable sound**, and raise the tablet's media volume. In `/admin`, use **Test sound on this device** to check the phone or PC; test a due task or timer on the tablet to check its speaker.
+4. Reload the tablet dashboard and raise the tablet's media volume. In `/admin`, use **Test sound on this device** to check the phone or PC; test a due task or timer on the tablet to check its speaker.
 
-Until the file is present, the tablet plays a built-in chime. Browsers require a tap before page audio can play, so tap **Enable sound** after each reload or browser restart. Alerts stay visible even if sound is blocked. The alarm repeats until dismissed or snoozed; it covers timers and due tasks for 24 hours after their target time. Acknowledgements and snoozes are stored in that tablet browser.
+Until the file is present, the tablet plays a built-in chime. Some browsers block automatic audio until you tap the page or allow autoplay for the dashboard site; if that happens, **Enable sound** appears inside an active alarm. Alerts stay visible even if sound is blocked. The alarm repeats until dismissed or snoozed; it covers timers and due tasks for 24 hours after their target time. Acknowledgements and snoozes are stored in that tablet browser.
 
 The admin session lasts seven days and is stored in that browser's local storage. The password is hashed with scrypt in `data/db.json`. Keep `data/` and `.env` private and back up the `data/` directory or use the JSON export regularly.
 
