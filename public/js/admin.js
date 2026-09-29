@@ -122,9 +122,16 @@ async function refreshTimers() {
     const sp = document.createElement('span'); sp.className = 'grow';
     sp.textContent = `${t.done ? '✓ ' : ''}${t.name} — ${leftText(t)}`;
     const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = t.type === 'long' ? '📅 long' : '⏱ short';
+    const col = document.createElement('input'); col.type = 'color'; col.title = 'Timer color';
+    col.value = /^#[0-9a-fA-F]{6}$/.test(t.color || '') ? t.color : '#2b6cff';
+    col.style.cssText = 'width:34px;padding:2px;cursor:pointer';
+    col.onchange = async () => {
+      await authFetch('/api/timers/' + t.id, { method: 'PATCH', body: JSON.stringify({ color: col.value }) });
+      msg('Color updated ✓');
+    };
     const del = document.createElement('button'); del.textContent = '✕'; del.className = 'ghost';
     del.onclick = async () => { await authFetch('/api/timers/' + t.id, { method: 'DELETE' }); refreshTimers(); };
-    li.append(cb, sp, tag, del); ul.appendChild(li);
+    li.append(cb, sp, tag, col, del); ul.appendChild(li);
   });
 }
 function leftText(t) {
@@ -261,10 +268,11 @@ function timerName() {
   if (!el.value.trim()) { msg('Give the timer a name first'); return null; }
   return el.value.trim();
 }
+function timerColor() { return document.getElementById('tm-color').value; }
 document.getElementById('tm-long-set').onclick = async () => {
   const name = timerName(); if (!name) return;
   const days = Number(document.getElementById('tm-days').value || 0);
-  const r = await authFetch('/api/timers', { method: 'POST', body: JSON.stringify({ name, type: 'long', days }) });
+  const r = await authFetch('/api/timers', { method: 'POST', body: JSON.stringify({ name, type: 'long', days, color: timerColor() }) });
   if (!r.ok) { msg((await r.json()).error || 'Failed'); return; }
   msg(`"${name}" set ✓`); refreshTimers();
 };
@@ -272,14 +280,14 @@ document.getElementById('tm-date-set').onclick = async () => {
   const name = timerName(); if (!name) return;
   const date = document.getElementById('tm-date').value;
   if (!date) { msg('Pick a date first'); return; }
-  const r = await authFetch('/api/timers', { method: 'POST', body: JSON.stringify({ name, type: 'long', date }) });
+  const r = await authFetch('/api/timers', { method: 'POST', body: JSON.stringify({ name, type: 'long', date, color: timerColor() }) });
   if (!r.ok) { msg((await r.json()).error || 'Failed'); return; }
   msg(`"${name}" set ✓`); refreshTimers();
 };
 document.getElementById('tm-short-start').onclick = async () => {
   const name = timerName(); if (!name) return;
   const r = await authFetch('/api/timers', { method: 'POST', body: JSON.stringify({
-    name, type: 'short',
+    name, type: 'short', color: timerColor(),
     hours: Number(document.getElementById('tm-h').value || 0),
     mins: Number(document.getElementById('tm-m').value || 0)
   }) });
@@ -290,7 +298,7 @@ document.getElementById('tm-at-start').onclick = async () => {
   const name = timerName(); if (!name) return;
   const atTime = document.getElementById('tm-at').value;
   if (!atTime) { msg('Pick a time first'); return; }
-  const r = await authFetch('/api/timers', { method: 'POST', body: JSON.stringify({ name, type: 'short', atTime }) });
+  const r = await authFetch('/api/timers', { method: 'POST', body: JSON.stringify({ name, type: 'short', atTime, color: timerColor() }) });
   if (!r.ok) { msg((await r.json()).error || 'Failed'); return; }
   msg(`"${name}" counts down to ${atTime} ✓`); refreshTimers();
 };

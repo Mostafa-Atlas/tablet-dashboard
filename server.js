@@ -272,6 +272,9 @@ function sortTimers(list) {
   });
 }
 function makeTimerId() { return 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+function cleanColor(c) {
+  return /^#[0-9a-fA-F]{6}$/.test(String(c || '')) ? String(c) : null;
+}
 app.get('/api/timers', (req, res) => res.json(sortTimers(db.timers || [])));
 app.post('/api/timers', adminAuth, (req, res) => {
   const b = req.body || {};
@@ -300,7 +303,7 @@ app.post('/api/timers', adminAuth, (req, res) => {
       extra.durationSec = Math.round(dur);
     }
   }
-  const t = { id: makeTimerId(), name, type, targetAt, createdAt: Date.now(), done: false, pausedLeftSec: null, ...extra };
+  const t = { id: makeTimerId(), name, type, targetAt, createdAt: Date.now(), done: false, pausedLeftSec: null, color: cleanColor(b.color), ...extra };
   db.timers = [...(db.timers || []), t].slice(-20);
   saveDb(); broadcast('timers', sortTimers(db.timers));
   res.json(t);
@@ -311,6 +314,7 @@ app.patch('/api/timers/:id', adminAuth, (req, res) => {
   const b = req.body || {};
   if (typeof b.name === 'string' && b.name.trim()) t.name = b.name.trim().slice(0, 60);
   if (typeof b.done === 'boolean') t.done = b.done;
+  if (typeof b.color !== 'undefined') t.color = cleanColor(b.color);
   if (b.action === 'pause' && t.targetAt) {
     t.pausedLeftSec = Math.max(0, Math.round((t.targetAt - Date.now()) / 1000));
     t.targetAt = null;

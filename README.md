@@ -118,7 +118,8 @@ Session lasts 7 days (token in browser localStorage). No browser popup — wrong
 - **Timers (multiple, named):** pick 📅 Long or ⏱ Short, type a name, then:
   - Long → days from now **or** a target date (kiosk shows `12d 4h` counting from today).
   - Short → countdown hours/mins **or** a clock time today like `18:30` (kiosk counts down to it).
-  - All timers list below with a **checkbox** to mark done, tag, and delete. Done timers show ✓ on the kiosk.
+  - All timers list below with a **checkbox** to mark done, a **color dot** to recolor, tag, and delete. Done timers show ✓ on the kiosk, each in its own color (left border + progress bar).
+- Empty to-do / empty day shows *"You have nothing to do, sir 🎩"* on the tablet.
 - **Storage:** per-disk bars on the kiosk turn red past 80%. Agent sends disks every 3h.
 - **Dashboard time:** pick date + time in `/admin` to shift the kiosk clock (shows day-month-year like `12-1-2026`), or reset to real time. Only the clock display shifts — timers keep real time.
 - **Google Calendar:** paste your calendar's **Secret address in iCal format** (Calendar Settings → Integrate calendar) into the `/admin` Calendar card → Connect. Tablet shows **today's events in a vertical timeline** (all-day chips on top, live event highlighted, `now` marker, done items dimmed), refreshed every 10 min. Supports recurring events. The URL stays server-side — never sent to the tablet.

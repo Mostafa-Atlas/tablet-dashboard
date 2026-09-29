@@ -38,7 +38,8 @@ body{margin:0;background:radial-gradient(1200px 600px at 50% -10%,#15151d 0%,var
 /* timers */
 #timers{display:flex;flex-direction:column;gap:12px;overflow-y:auto;min-height:0;padding:2px;text-align:left}
 #timers::-webkit-scrollbar{width:6px} #timers::-webkit-scrollbar-thumb{background:#333;border-radius:99px}
-.timer{background:#101014;border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+.timer{background:#101014;border:1px solid var(--line);border-left:4px solid var(--tc,var(--line));border-radius:14px;padding:14px 16px}
+.timer .bar i{background:linear-gradient(90deg,var(--tc,var(--accent)),var(--accent2))}
 .timer-head{display:flex;align-items:center;gap:10px;margin-bottom:4px}
 .timer-name{font-size:15px;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .timer-badge{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--dim);border:1px solid var(--line);border-radius:99px;padding:3px 10px}
