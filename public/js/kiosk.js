@@ -41,6 +41,7 @@ function refreshPCStatus() {
   if (age < 10) { pill.textContent = 'PC ONLINE'; pill.className = 'pill ok'; }
   else { pill.textContent = 'PC OFFLINE'; pill.className = 'pill bad'; }
   $('pc-age').textContent = pc.updatedAt ? (age <= 2 ? 'updated just now' : `updated ${age}s ago`) : 'agent not connected yet';
+  syncLayout();
 }
 function setBar(k, v) {
   if (v == null) {
@@ -87,7 +88,11 @@ function renderTodos(list) {
   lastTodos = list || [];
   const ul = $('todos'); ul.innerHTML = '';
   const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
+  const missed = lastTodos.filter(t => !t.done && (!t.repeat || t.repeat === 'none') && t.dueAt && t.dueAt < todayStart).length;
+  $('missed-summary').hidden = !missed;
+  $('missed-summary').textContent = `${missed} older ${missed === 1 ? 'task needs' : 'tasks need'} a new time in admin`;
   const vis = lastTodos.filter(t => !t.done && (display.showCalendar === false || !t.dueAt || t.dueAt >= todayEnd)).sort((a, b) => {
     const rank = { high: 0, normal: 1, low: 2 };
     return (rank[a.priority] ?? 1) - (rank[b.priority] ?? 1) || (a.dueAt || Infinity) - (b.dueAt || Infinity);
@@ -111,6 +116,7 @@ function renderTodos(list) {
   });
   if (done) { const li = document.createElement('li'); li.className = 'dim'; li.textContent = `+ ${done} done`; ul.appendChild(li); }
   if (lastCal) renderEvent(lastCal);
+  renderNext();
   updateAlarms();
 }
 
@@ -130,7 +136,7 @@ function renderTimers(t) {
   timers = normalizeTimers(t);
   const box = $('timers');
   box.innerHTML = '';
-  if (!timers.length) { box.innerHTML = '<div class="dim">No timers — add from /admin</div>'; return; }
+  if (!timers.length) { syncLayout(); renderNext(); return; }
   timers.forEach(tm => {
     const card = document.createElement('div');
     card.className = 'timer' + (tm.done ? ' done' : '') + (tm.type === 'short' ? ' short' : '');
@@ -144,6 +150,7 @@ function renderTimers(t) {
     box.appendChild(card);
   });
   tickTimers();
+  syncLayout();
   updateAlarms();
 }
 function tickTimers() {
@@ -217,12 +224,19 @@ function renderWeather(w) {
   if (!w || w.temp == null) {
     $('weather-icon').setAttribute('hidden', '');
     $('weather-text').textContent = 'Weather unavailable';
+    $('weather-extra').hidden = true;
     return;
   }
   const stale = Date.now() + serverClockOffsetMs - (w.updatedAt || 0) > 90 * 60 * 1000;
   $('weather-icon-use').setAttribute('href', `/icons/weather.svg#${weatherSymbol(w)}`);
   $('weather-icon').removeAttribute('hidden');
   $('weather-text').textContent = `${w.temp}°C ${w.label || 'Weather'}${stale ? ' · stale' : ''}`;
+  const details = [];
+  if (Number.isFinite(w.high)) details.push(`High ${w.high}°`);
+  if (Number.isFinite(w.low)) details.push(`Low ${w.low}°`);
+  if (Number.isFinite(w.rainChance)) details.push(`Rain up to ${w.rainChance}%`);
+  $('weather-extra').textContent = details.join(' · ');
+  $('weather-extra').hidden = !details.length;
 }
 
 function renderTime(t) {
@@ -248,7 +262,7 @@ function renderEvent(cal) {
   // all-day chips first
   const allDay = list.filter(e => e.allDay);
   const timed = list.filter(e => !e.allDay).map(e => ({ ...e, kind: 'event' }));
-  const dueTasks = lastTodos.filter(t => !t.done && t.dueAt && t.dueAt < dayEnd)
+  const dueTasks = lastTodos.filter(t => !t.done && t.dueAt && t.dueAt >= dayStart && t.dueAt < dayEnd)
     .map(t => ({ kind: 'task', startMs: t.dueAt, endMs: t.dueAt, summary: t.text, priority: t.priority || 'normal' }));
   timed.push(...dueTasks);
   timed.sort((a, b) => a.startMs - b.startMs || (a.kind === 'task' ? -1 : 1));
@@ -267,6 +281,7 @@ function renderEvent(cal) {
     el.innerHTML += cal?.error
       ? '<span class="dim">Calendar error — retrying…</span>'
       : '<span class="empty-msg dim">No events or due tasks today</span>';
+    renderNext();
     return;
   }
   const rail = document.createElement('div');
@@ -306,7 +321,34 @@ function renderEvent(cal) {
     rail.insertBefore(m, firstFuture);
   }
   el.appendChild(rail);
+  renderNext();
 }
+function renderNext() {
+  const now = Date.now();
+  const future = [];
+  if (display.showTodos !== false) lastTodos.filter(t => !t.done && t.dueAt > now)
+    .forEach(t => future.push({ at: t.dueAt, name: t.text, kind: 'Task', priority: t.priority || 'normal' }));
+  if (display.showCalendar !== false) (lastCal?.upcoming || []).filter(e => !e.allDay && e.startMs > now)
+    .forEach(e => future.push({ at: e.startMs, name: e.summary, kind: 'Calendar' }));
+  future.sort((a, b) => a.at - b.at || Number(b.priority === 'high') - Number(a.priority === 'high'));
+  const next = future[0];
+  $('next-card').hidden = !next || next.at - now > 7 * 86400000;
+  if ($('next-card').hidden) return;
+  const at = new Date(next.at), today = new Date();
+  const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+  const day = at.toDateString() === today.toDateString() ? 'Today'
+    : at.toDateString() === tomorrow.toDateString() ? 'Tomorrow'
+      : at.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  $('next-title').textContent = next.name;
+  $('next-countdown').textContent = relTime(next.at, false);
+  $('next-detail').textContent = `${next.kind}${next.priority === 'high' ? ' · High priority' : ''} · ${day} ${fmtTime(at)}`;
+}
+setInterval(renderNext, 30000);
+let renderedDay = new Date().toDateString();
+setInterval(() => {
+  const day = new Date().toDateString();
+  if (day !== renderedDay) { renderedDay = day; renderTodos(lastTodos); }
+}, 60000);
 function fmtTime(d) {
   let h = d.getHours(), m = String(d.getMinutes()).padStart(2, '0');
   const ap = h >= 12 ? 'PM' : 'AM';
@@ -349,6 +391,7 @@ function renderRoutines(routines) {
     });
     card.appendChild(list); box.appendChild(card);
   });
+  syncLayout();
 }
 let soundContext = null, fallbackLoop = null, soundAttempt = 0, customSoundFailed = false;
 async function customSoundReady() {
@@ -426,9 +469,10 @@ $('alarm-enable').onclick = () => { customSoundFailed = false; startAlarmSound()
 function updateAlarms() {
   const now = Date.now();
   const candidates = [];
-  lastTodos.filter(t => !t.done && t.dueAt && now >= t.dueAt && now - t.dueAt < 86400000)
+  const stillEligible = (id, at) => now - at < 86400000 || alarmMemory[id]?.snoozedUntil > at;
+  lastTodos.filter(t => !t.done && t.dueAt && now >= t.dueAt && stillEligible(`task:${t.id}:${t.dueAt}`, t.dueAt))
     .forEach(t => candidates.push({ id: `task:${t.id}:${t.dueAt}`, name: t.text, detail: 'Task due', at: t.dueAt }));
-  timers.filter(t => !t.done && t.targetAt && now >= t.targetAt && now - t.targetAt < 86400000)
+  timers.filter(t => !t.done && t.targetAt && now >= t.targetAt && stillEligible(`timer:${t.id}:${t.targetAt}`, t.targetAt))
     .forEach(t => candidates.push({ id: `timer:${t.id}:${t.targetAt}`, name: t.name, detail: 'Timer finished', at: t.targetAt }));
   candidates.sort((a, b) => a.at - b.at);
   const next = candidates.find(a => !alarmMemory[a.id]?.dismissed && (!alarmMemory[a.id]?.snoozedUntil || alarmMemory[a.id].snoozedUntil <= now));
@@ -446,15 +490,32 @@ $('alarm-dismiss').onclick = () => {
   if (!currentAlarm) return;
   alarmMemory[currentAlarm.id] = { dismissed: true }; saveAlarmMemory(); updateAlarms();
 };
-$('alarm-snooze').onclick = () => {
-  if (!currentAlarm) return;
-  alarmMemory[currentAlarm.id] = { snoozedUntil: Date.now() + 5 * 60000 }; saveAlarmMemory(); updateAlarms();
-};
+document.querySelectorAll('.alarm-snooze').forEach(button => {
+  button.onclick = () => {
+    if (!currentAlarm) return;
+    const minutes = Number(button.dataset.minutes);
+    if (![5, 10, 30].includes(minutes)) return;
+    alarmMemory[currentAlarm.id] = { snoozedUntil: Date.now() + minutes * 60000 };
+    saveAlarmMemory(); updateAlarms();
+  };
+});
 
 /* ---------- Kiosk display and connection state ---------- */
 let display = {};
 let streamConnected = false;
 let lastStreamAt = 0;
+function syncLayout() {
+  const pc = lastPC || {};
+  const age = pc.updatedAt ? Math.max(0, Date.now() + serverClockOffsetMs - pc.updatedAt) : Infinity;
+  const showPC = display.showPC !== false && display.mode !== 'focus' && age < 10000;
+  const showTimers = display.showTimers !== false && timers.length > 0;
+  const showRoutines = !$('routine-section').hidden;
+  $('pc-card').hidden = !showPC;
+  $('timer-card').hidden = !showTimers;
+  $('life-card').hidden = display.showCalendar === false && display.showTodos === false;
+  document.body.classList.toggle('compact-grid', !showPC || !showTimers || display.mode === 'focus');
+  document.body.classList.toggle('solo-grid', !showPC && !showTimers && !showRoutines);
+}
 function quietNow(start, end) {
   const d = new Date(), hhmm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
   return start <= end ? hhmm >= start && hhmm < end : hhmm >= start || hhmm < end;
@@ -465,11 +526,11 @@ function applyDisplay(prefs) {
   document.body.classList.toggle('focus', display.mode === 'focus');
   document.body.classList.toggle('large-text', display.textSize === 'large');
   document.body.classList.toggle('quiet', !!display.quietEnabled && quietNow(display.quietStart || '23:00', display.quietEnd || '07:00'));
-  $('pc-card').hidden = display.showPC === false;
-  $('timer-card').hidden = display.showTimers === false;
   $('today-section').hidden = display.showCalendar === false;
   $('todo-section').hidden = display.showTodos === false;
   $('pc-state').hidden = display.showPC === false || display.mode === 'focus';
+  syncLayout();
+  renderNext();
   if (previousShowCalendar !== display.showCalendar && lastTodos.length) renderTodos(lastTodos);
 }
 function updateConnection() {

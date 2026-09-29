@@ -43,7 +43,7 @@ function defaultDb() {
       cpu: 0, ram: 0, gpu: 0, gpuTemp: null, cpuTemp: null,
       uptimeSec: 0, disks: [], updatedAt: 0
     },
-    weather: { temp: null, code: null, label: '—', isDay: null, updatedAt: 0 },
+    weather: { temp: null, code: null, label: '—', isDay: null, high: null, low: null, rainChance: null, updatedAt: 0 },
     time: { offsetSec: 0, updatedAt: 0 }, // dashboard clock = real time + offset (set from /admin)
     settings: { icsUrl: '' }, // Google Calendar private ICS URL (set from /admin)
     calendar: { next: null, upcoming: [], updatedAt: 0, error: null, configured: false },
@@ -298,6 +298,11 @@ function weekKey(now = Date.now()) {
   day.setUTCDate(day.getUTCDate() - (day.getUTCDay() + 6) % 7);
   return day.toISOString().slice(0, 10);
 }
+function addDays(day, count) {
+  const date = new Date(`${day}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + count);
+  return date.toISOString().slice(0, 10);
+}
 function cairoTimestamp(day, time) {
   const [year, month, date] = day.split('-').map(Number);
   const [hour, minute] = time.split(':').map(Number);
@@ -363,6 +368,19 @@ app.post('/api/todos', adminAuth, (req, res) => {
 app.patch('/api/todos/:id', adminAuth, (req, res) => {
   const t = db.todos.find(x => x.id === req.params.id);
   if (!t) return res.status(404).json({ error: 'not found' });
+  if (req.body.action === 'moveToday' || req.body.action === 'moveTomorrow') {
+    if ((t.repeat && t.repeat !== 'none') || todoDone(t) || !Number.isFinite(t.dueAt) || t.dueAt >= Date.now()) {
+      return res.status(409).json({ error: 'Only overdue one-time tasks can be rescheduled here' });
+    }
+    if (req.body.action === 'moveToday') {
+      const endOfToday = cairoTimestamp(addDays(dayKey(), 1), '00:00');
+      const target = Math.min(Date.now() + 3600000, endOfToday - 60000);
+      if (target <= Date.now() + 60000) return res.status(409).json({ error: 'Too late today; choose tomorrow or Schedule' });
+      t.dueAt = target;
+    } else t.dueAt = cairoTimestamp(addDays(dayKey(), 1), '09:00');
+    saveDb(); broadcastTodos();
+    return res.json({ ...t, dueAt: todoDueAt(t) });
+  }
   if (req.body.priority !== undefined && !['high', 'normal', 'low'].includes(req.body.priority)) return res.status(400).json({ error: 'Invalid priority' });
   if (req.body.dueAt !== undefined && validDueAt(req.body.dueAt) === undefined) return res.status(400).json({ error: 'Invalid due date' });
   if (req.body.dueTime !== undefined && !validDueTime(req.body.dueTime)) return res.status(400).json({ error: 'Invalid due time' });
@@ -685,7 +703,7 @@ const WEATHER_META = {
 };
 async function refreshWeather() {
   try {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${WEATHER_LAT}&longitude=${WEATHER_LON}&current=temperature_2m,weather_code,is_day&timezone=Africa%2FCairo`;
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${WEATHER_LAT}&longitude=${WEATHER_LON}&current=temperature_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&forecast_days=1&timezone=Africa%2FCairo`;
     const r = await fetch(url, { signal: AbortSignal.timeout(10000) });
     if (!r.ok) throw new Error(`Open-Meteo HTTP ${r.status}`);
     const j = await r.json();
@@ -694,11 +712,19 @@ async function refreshWeather() {
     if (j.current?.temperature_2m == null || j.current?.weather_code == null || !Number.isFinite(temp) || !Number.isInteger(code)) {
       throw new Error('Invalid Open-Meteo response');
     }
+    const dailyNumber = (values, minimum, maximum) => {
+      const value = values?.[0];
+      return value != null && Number.isFinite(Number(value)) && Number(value) >= minimum && Number(value) <= maximum
+        ? Math.round(Number(value)) : null;
+    };
     db.weather = {
       temp: Math.round(temp),
       code,
       label: WEATHER_META[code] || 'Weather',
       isDay: j.current.is_day == null ? null : Number(j.current.is_day) === 1,
+      high: dailyNumber(j.daily?.temperature_2m_max, -100, 70),
+      low: dailyNumber(j.daily?.temperature_2m_min, -100, 70),
+      rainChance: dailyNumber(j.daily?.precipitation_probability_max, 0, 100),
       updatedAt: Date.now()
     };
     broadcast('weather', db.weather);

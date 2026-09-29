@@ -109,6 +109,7 @@ async function doLogin() {
 async function refresh() {
   const r = await authFetch('/api/todos');
   if (!r.ok) return;  const todos = await r.json();
+  renderMissedTasks(todos);
   const ul = document.getElementById('list'); ul.innerHTML = '';
   todos.forEach((t, index) => {
     const li = document.createElement('li');
@@ -195,6 +196,39 @@ async function refresh() {
   refreshAgentToken();
   refreshNote();
   refreshRoutines();
+}
+
+function renderMissedTasks(todos) {
+  const missed = todos.filter(t => !t.done && (!t.repeat || t.repeat === 'none') && t.dueAt && t.dueAt < Date.now());
+  const section = byId('missed-tasks'), list = byId('missed-list');
+  section.hidden = !missed.length;
+  list.replaceChildren();
+  missed.sort((a, b) => a.dueAt - b.dueAt).forEach(t => {
+    const item = document.createElement('li'); item.className = 'missed-item';
+    const info = document.createElement('div'); info.className = 'grow';
+    const name = document.createElement('strong'); name.textContent = t.text;
+    const due = document.createElement('small'); due.className = 'sub2';
+    due.textContent = `Was due ${new Date(t.dueAt).toLocaleString()}`;
+    info.append(name, due);
+    const actions = document.createElement('div'); actions.className = 'item-actions';
+    const change = async (body, success) => {
+      actions.querySelectorAll('button').forEach(button => { button.disabled = true; });
+      try {
+        const result = await authFetch(`/api/todos/${t.id}`, { method: 'PATCH', body: JSON.stringify(body) });
+        if (!result.ok) { msg((await result.json()).error || 'Could not update task'); return; }
+        const updated = await result.json();
+        msg(updated.dueAt && !updated.done ? `Moved to ${new Date(updated.dueAt).toLocaleString()}` : success);
+        refresh();
+      } catch { msg('Could not reach the server'); }
+      finally { actions.querySelectorAll('button').forEach(button => { button.disabled = false; }); }
+    };
+    actions.append(
+      actionButton('Today', `Move ${t.text} to later today`, () => change({ action: 'moveToday' }, 'Moved to later today')),
+      actionButton('Tomorrow · 9 AM', `Move ${t.text} to tomorrow at 9 AM`, () => change({ action: 'moveTomorrow' }, 'Moved to tomorrow')),
+      actionButton('Done', `Mark ${t.text} done`, () => change({ done: true }, 'Task completed'))
+    );
+    item.append(info, actions); list.appendChild(item);
+  });
 }
 
 async function refreshTimers() {

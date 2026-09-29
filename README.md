@@ -18,7 +18,7 @@ node server.js
 Open `http://localhost:1200/admin` and create an admin account. Open `http://localhost:1200/` for the display. Use `http://<server-LAN-or-Tailscale-IP>:1200/` on the tablet. The first display shows sample tasks and a timer until you replace them in admin.
 
 The server listens on `0.0.0.0`; allow port 1200 only on the network you intend to use. Change `PORT` in `.env` if needed. Weather defaults to 6th of October City, Giza; change `WEATHER_LAT` and `WEATHER_LON` in `.env` for another location.
-Weather uses Open-Meteo's current conditions, refreshes every 30 minutes, and shows local SVG icons that change between day and night. The tablet links to Open-Meteo for data attribution. The free API is intended for non-commercial use.
+Weather uses Open-Meteo's current conditions and today's high, low, and peak hourly chance of rain. It refreshes every 30 minutes and shows local SVG icons that change between day and night. The tablet links to Open-Meteo for data attribution. The free API is intended for non-commercial use.
 
 ## Run with Docker on the home lab
 
@@ -50,15 +50,15 @@ For Task Scheduler, run the agent at logon with both `SERVER` and `AGENT_TOKEN` 
 
 Use Fully Kiosk Browser or Chrome. Set the start URL to `http://<lab-ip>:1200/` and enable fullscreen and keep-screen-on as needed. The tablet displays information; controls stay in `/admin`.
 
-- **Overview** shows today, timers, and PC stats. **Focus** shows today and timers.
+- **Overview** shows today, timers, and PC stats. **Focus** shows today and timers. The **Up next** strip highlights the nearest upcoming event or due task within seven days. Empty timer cards disappear, and offline PC stats collapse so the remaining cards get more room.
 - Portrait and narrow widths use a single column; landscape uses two or three columns based on available width.
 - In `/admin` → **Tablet display**, choose text size, visible sections, calendar privacy, and quiet hours. Quiet hours dim the page on the tablet according to the tablet's local time.
 - **DASHBOARD LIVE** reports the server stream. **RECONNECTING** means the display is waiting for it. **PC ONLINE/OFFLINE** separately reports agent freshness.
-- Alarm sound is on by default: the tablet tries to play it when a task is due or a timer finishes. Keep the tablet's media volume up. If the browser blocks automatic playback, **Enable sound** appears inside the alarm. **Snooze 5 min** and **Dismiss** act on that tablet.
+- Alarm sound is on by default: the tablet tries to play it when a task is due or a timer finishes. Keep the tablet's media volume up. If the browser blocks automatic playback, **Enable sound** appears inside the alarm. Snooze for **5**, **10**, or **30** minutes, or dismiss the alarm on that tablet.
 
 ## Use `/admin`
 
-- **To-do:** add, rename, complete, delete, and move tasks up or down. Set **High**, **Normal**, or **Low** priority, with an optional due date for one-time tasks or time and weekday for repeating tasks. Due tasks appear alongside calendar events in **Today**, with a countdown and alarm. The other incomplete tasks appear below, with high priorities first. Daily tasks reset at the next Cairo calendar day; weekly tasks reset on Monday in Cairo time.
+- **To-do:** add, rename, complete, delete, and move tasks up or down. Set **High**, **Normal**, or **Low** priority, with an optional due date for one-time tasks or time and weekday for repeating tasks. Due tasks appear alongside calendar events in **Today**, with a countdown and alarm. The other incomplete tasks appear below, with high priorities first. Overdue one-time tasks appear under **Needs a new time** in admin: move one to later today, tomorrow at 9 AM Cairo time, or mark it done. Daily tasks reset at the next Cairo calendar day; weekly tasks reset on Monday in Cairo time.
 - **Pinned note:** write and save a note from `/admin` on your phone or PC. It updates immediately above the tablet's Today/calendar section.
 - **Routine checklists:** create daily or weekly routines, add steps, and check them off from `/admin`. The tablet shows the steps and progress; checks reset at the next Cairo day or week.
 - **Timers:** create a long timer by number of days or target date. Create a short timer by duration, clock time, or a 25-minute, 1-hour, or 2-hour preset. The form previews its end time. Existing timers can be renamed, given a new end time or color, paused, resumed, restarted when eligible, marked done, or deleted. Finished timers pulse for 30 seconds.

@@ -84,6 +84,21 @@ test('dashboard data, agent access, privacy, and backup recovery', async () => {
     const due = Date.now() + 120000;
     const planned = (await request('/api/todos', 'POST', { text: 'Due soon', dueAt: due, priority: 'high' }, token)).data;
     assert.equal((await request('/api/todos')).data.find(t => t.id === planned.id).dueAt, due);
+    const missed = (await request('/api/todos', 'POST', { text: 'Missed task', dueAt: Date.now() - 3600000 }, token)).data;
+    assert.equal((await request(`/api/todos/${planned.id}`, 'PATCH', { action: 'moveToday' }, token)).status, 409);
+    const laterToday = await request(`/api/todos/${missed.id}`, 'PATCH', { action: 'moveToday' }, token);
+    if (laterToday.status === 200) {
+      assert.ok(laterToday.data.dueAt > Date.now());
+      assert.ok(laterToday.data.dueAt <= Date.now() + 3600000);
+    } else {
+      const cairoHour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Cairo', hour: '2-digit', hourCycle: 'h23' }).format(Date.now()));
+      assert.equal(laterToday.status, 409);
+      assert.equal(cairoHour, 23);
+    }
+    const anotherMissed = (await request('/api/todos', 'POST', { text: 'Another missed task', dueAt: Date.now() - 3600000 }, token)).data;
+    const tomorrow = await request(`/api/todos/${anotherMissed.id}`, 'PATCH', { action: 'moveTomorrow' }, token);
+    assert.equal(tomorrow.status, 200);
+    assert.equal(new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Cairo', hour: '2-digit', hourCycle: 'h23' }).format(tomorrow.data.dueAt), '09');
     assert.equal((await request(`/api/todos/${planned.id}`, 'PATCH', { priority: 'low', dueAt: null }, token)).data.priority, 'low');
     assert.equal((await request('/api/todos')).data.find(t => t.id === planned.id).dueAt, null);
     const repeating = (await request('/api/todos', 'POST', { text: 'Weekly reminder', repeat: 'weekly', dueTime: '18:30', dueWeekday: 2 }, token)).data;

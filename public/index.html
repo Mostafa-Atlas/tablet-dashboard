@@ -16,8 +16,7 @@
     <div class="tb-right">
       <span id="weather" class="weather-summary">
         <svg id="weather-icon" viewBox="0 0 48 48" aria-hidden="true" hidden><use id="weather-icon-use" href="/icons/weather.svg#cloudy"></use></svg>
-        <span id="weather-text">—</span>
-        <a class="weather-credit" href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo</a>
+        <span class="weather-copy"><span id="weather-text">—</span><span class="weather-sub"><span id="weather-extra" hidden></span><a class="weather-credit" href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo</a></span></span>
       </span>
       <span id="dashboard-state" class="pill bad">CONNECTING</span>
       <span id="pc-state" class="pill">PC …</span>
@@ -26,8 +25,14 @@
 
   <div id="alarm-banner" class="alarm-banner" role="alert" hidden>
     <div><strong id="alarm-title">Reminder</strong><span id="alarm-detail"></span><span id="alarm-sound-help" hidden> · Sound blocked by browser</span></div>
-    <div class="alarm-actions"><button id="alarm-enable" type="button" hidden>Enable sound</button><button id="alarm-snooze" type="button">Snooze 5 min</button><button id="alarm-dismiss" type="button">Dismiss</button></div>
+    <div class="alarm-actions"><button id="alarm-enable" type="button" hidden>Enable sound</button><button class="alarm-snooze" data-minutes="5" type="button">Snooze 5m</button><button class="alarm-snooze" data-minutes="10" type="button">10m</button><button class="alarm-snooze" data-minutes="30" type="button">30m</button><button id="alarm-dismiss" type="button">Dismiss</button></div>
   </div>
+
+  <section id="next-card" class="next-card" aria-label="Up next" hidden>
+    <span class="next-kicker">UP NEXT</span>
+    <div class="next-content"><strong id="next-title"></strong><span id="next-countdown"></span></div>
+    <span id="next-detail"></span>
+  </section>
 
   <main id="grid">
     <div id="life-column">
@@ -39,6 +44,7 @@
         </div>
         <div id="todo-section">
           <h2 class="mt">To-Do</h2>
+          <div id="missed-summary" class="missed-summary" hidden></div>
           <ul id="todos"><li class="dim">Loading…</li></ul>
         </div>
       </section>

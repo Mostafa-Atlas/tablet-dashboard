@@ -43,6 +43,11 @@
   .item-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
   .item-actions button{min-width:44px;padding:8px 10px}
   .item-actions select{max-width:110px}
+  #missed-tasks{margin:18px 0 14px;padding:14px;border:1px solid rgba(255,176,46,.4);border-radius:14px;background:rgba(255,176,46,.06)}
+  #missed-tasks h3{margin:0 0 5px;font-size:16px;color:#ffd495}
+  #missed-list .missed-item{align-items:flex-start}
+  #missed-list .item-actions{width:100%;margin-top:6px}
+  #missed-list .item-actions button{flex:1}
   .presets{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
   .presets button{flex:1;min-width:95px}
   @media(max-width:540px){.row>.field{flex-basis:100%}.row>button{flex:1}.appbar{flex-wrap:wrap}.appbar .brand{flex-basis:100%}}
@@ -133,6 +138,7 @@
           <div class="field" id="todo-time-wrap" hidden><label for="todo-due-time">Due time</label><input id="todo-due-time" type="time" /></div>
           <div class="field" id="todo-weekday-wrap" hidden><label for="todo-weekday">Day</label><select id="todo-weekday"><option value="0">Monday</option><option value="1">Tuesday</option><option value="2">Wednesday</option><option value="3">Thursday</option><option value="4">Friday</option><option value="5">Saturday</option><option value="6">Sunday</option></select></div>
           <button id="todo-add">Add task</button></div>
+        <div id="missed-tasks" hidden><h3>Needs a new time</h3><p class="hint">One-time tasks past their due time. Move one to later today, tomorrow at 9 AM, or use Schedule for a different time.</p><ul class="items" id="missed-list"></ul></div>
         <ul class="items" id="list"></ul>
       </section>
 
