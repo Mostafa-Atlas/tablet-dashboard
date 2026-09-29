@@ -72,7 +72,7 @@ function renderTodos(list) {
   const ul = $('todos'); ul.innerHTML = '';
   const vis = (list || []).filter(t => !t.done).slice(0, 5);
   const done = (list || []).filter(t => t.done).length;
-  if (!vis.length) ul.innerHTML = '<li class="dim">You have nothing to do, sir 🎩</li>';
+  if (!vis.length) ul.innerHTML = '<li class="empty-msg dim">You have nothing to do, sir 🎩</li>';
   vis.forEach(t => {
     const li = document.createElement('li');
     li.innerHTML = `<span class="chk"></span><span></span>`;
@@ -213,7 +213,7 @@ function renderEvent(cal) {
   if (!timed.length && !allDay.length) {
     el.innerHTML += cal.error
       ? '<span class="dim">Calendar error — retrying…</span>'
-      : '<span class="dim">You have nothing to do, sir 🎩</span>';
+      : '<span class="empty-msg dim">You have nothing to do, sir 🎩</span>';
     return;
   }
   const rail = document.createElement('div');
