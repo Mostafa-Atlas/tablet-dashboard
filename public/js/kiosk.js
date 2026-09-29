@@ -174,35 +174,83 @@ function renderTime(t) {
   tickClock();
 }
 
-/* ---------- Next calendar event ---------- */
+/* ---------- Today: vertical timeline ---------- */
 let lastCal = null;
 function renderEvent(cal) {
   lastCal = cal || null;
   const el = $('event');
-  if (!cal || !cal.configured) { el.innerHTML = '<span class="dim">Connect calendar in /admin</span>'; return; }
-  const n = cal.next;
-  if (!n) {
-    el.innerHTML = cal.error
-      ? '<span class="dim">Calendar error — retrying…</span>'
-      : 'No upcoming events';
+  el.innerHTML = '';
+  if (!cal || !cal.configured) {
+    el.innerHTML = '<span class="dim">Connect calendar in /admin</span>';
     return;
   }
-  // wall-clock display follows the dashboard offset; countdowns stay real-time
-  const d = new Date(n.startMs + clockOffsetSec * 1000);
+  const now = Date.now();
+  const dn = dashboardNow();
+  const dayStart = new Date(dn.getFullYear(), dn.getMonth(), dn.getDate()).getTime() - clockOffsetSec * 1000;
+  const dayEnd = dayStart + 86400000;
+  const list = (cal.upcoming || [])
+    .filter(e => e.startMs < dayEnd && e.endMs > dayStart)
+    .sort((a, b) => a.startMs - b.startMs);
+
+  // all-day chips first
+  const allDay = list.filter(e => e.allDay);
+  const timed = list.filter(e => !e.allDay);
+  if (allDay.length) {
+    const row = document.createElement('div');
+    row.className = 'tl-allday';
+    allDay.forEach(e => {
+      const c = document.createElement('span');
+      c.className = 'tl-chip';
+      c.textContent = '🗓 ' + e.summary;
+      row.appendChild(c);
+    });
+    el.appendChild(row);
+  }
+  if (!timed.length && !allDay.length) {
+    el.innerHTML += cal.error
+      ? '<span class="dim">Calendar error — retrying…</span>'
+      : '<span class="dim">No events today 🎉</span>';
+    return;
+  }
+  const rail = document.createElement('div');
+  rail.className = 'tl';
+  let firstFuture = null;
+  timed.forEach(e => {
+    const past = e.endMs <= now, live = e.startMs <= now && now < e.endMs;
+    const item = document.createElement('div');
+    item.className = 'tl-item' + (past ? ' past' : '') + (live ? ' live' : '');
+    const s = new Date(e.startMs + clockOffsetSec * 1000);
+    const en = new Date(e.endMs + clockOffsetSec * 1000);
+    const t = document.createElement('div');
+    t.className = 'tl-time';
+    t.textContent = fmtTime(s) + ' – ' + fmtTime(en);
+    const body = document.createElement('div');
+    body.className = 'tl-body';
+    const title = document.createElement('div');
+    title.className = 'tl-title';
+    title.textContent = e.summary;
+    const meta = document.createElement('div');
+    meta.className = 'tl-meta';
+    meta.textContent = (live ? 'now' : past ? 'done' : relTime(e.startMs, false)) + (e.location ? ' · ' + e.location : '');
+    body.append(title, meta);
+    item.append(t, body);
+    rail.appendChild(item);
+    if (!past && !live && !firstFuture) firstFuture = item;
+  });
+  // "now" marker between done/live and what's next
+  if (firstFuture && firstFuture !== rail.firstChild) {
+    const m = document.createElement('div');
+    m.className = 'tl-now';
+    m.innerHTML = '<span class="tl-now-dot"></span><span class="tl-now-line"></span><span class="tl-now-txt">now</span>';
+    rail.insertBefore(m, firstFuture);
+  }
+  el.appendChild(rail);
+}
+function fmtTime(d) {
   let h = d.getHours(), m = String(d.getMinutes()).padStart(2, '0');
   const ap = h >= 12 ? 'PM' : 'AM';
   h = h % 12 || 12;
-  const today = dashboardNow();
-  const sameDay = d.getDate() === today.getDate() && d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
-  const when = sameDay ? `${h}:${m} ${ap}` : `${h}:${m} ${ap} · ${d.getDate()}-${d.getMonth() + 1}`;
-  el.innerHTML = '';
-  const title = document.createElement('div');
-  title.className = 'event-title' + (n.ongoing ? ' live' : '');
-  title.textContent = (n.ongoing ? '● ' : '') + n.summary;
-  const sub = document.createElement('div');
-  sub.className = 'event-sub';
-  sub.textContent = `${relTime(n.startMs, n.ongoing)} · ${when}` + (n.location ? ` · ${n.location}` : '');
-  el.append(title, sub);
+  return `${h}:${m} ${ap}`;
 }
 function relTime(startMs, ongoing) {
   if (ongoing) return 'now';

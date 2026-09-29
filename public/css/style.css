@@ -55,9 +55,25 @@ body{margin:0;background:radial-gradient(1200px 600px at 50% -10%,#15151d 0%,var
 #todos li{display:flex;align-items:center;gap:12px;padding:11px 2px;border-bottom:1px solid #202027;font-size:18px}
 #todos li:last-child{border-bottom:none}
 #todos li.dim{border-bottom:none}
-/* next event */
-.event-title{font-size:19px;font-weight:700}
-.event-title.live{color:var(--good)}
-.event-sub{font-size:14px;color:var(--dim);margin-top:4px;font-variant-numeric:tabular-nums}
+/* today: vertical timeline */
+.tl-wrap{min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding-right:2px}
+.tl-wrap::-webkit-scrollbar{width:6px} .tl-wrap::-webkit-scrollbar-thumb{background:#333;border-radius:99px}
+.tl-allday{display:flex;flex-wrap:wrap;gap:6px}
+.tl-chip{font-size:12px;background:rgba(43,108,255,.14);border:1px solid rgba(43,108,255,.45);color:#bcd2ff;border-radius:99px;padding:5px 12px}
+.tl{position:relative;display:flex;flex-direction:column;padding-left:22px}
+.tl::before{content:"";position:absolute;left:6px;top:8px;bottom:8px;width:2px;background:#2b2b33;border-radius:99px}
+.tl-item{position:relative;padding:9px 0 9px 4px}
+.tl-item::before{content:"";position:absolute;left:-20px;top:15px;width:10px;height:10px;border-radius:50%;background:#3a3a45;border:2px solid #141418}
+.tl-item.live::before{background:var(--good);box-shadow:0 0 10px rgba(53,208,127,.8)}
+.tl-time{font-size:12px;color:var(--dim);font-variant-numeric:tabular-nums;letter-spacing:.02em}
+.tl-title{font-size:17px;font-weight:700;line-height:1.25}
+.tl-item.live .tl-title{color:var(--good)}
+.tl-meta{font-size:13px;color:var(--dim);margin-top:2px}
+.tl-item.past{opacity:.45}
+.tl-item.past .tl-title{text-decoration:line-through;text-decoration-thickness:1px}
+.tl-now{display:flex;align-items:center;gap:8px;margin:2px 0}
+.tl-now-dot{flex:none;width:10px;height:10px;margin-left:-20px;border-radius:50%;background:var(--warn);box-shadow:0 0 10px rgba(255,176,46,.9)}
+.tl-now-line{flex:1;height:2px;background:linear-gradient(90deg,var(--warn),transparent);border-radius:99px}
+.tl-now-txt{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--warn)}
 /* 10" portrait / small fallback: stack */
 @media (max-width:900px){ #grid{grid-template-columns:1fr;overflow-y:auto} .timer-left{font-size:40px} }

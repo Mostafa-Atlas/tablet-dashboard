@@ -214,6 +214,9 @@ async function refreshCal() {
         let h = d.getHours(), m = String(d.getMinutes()).padStart(2, '0');
         const ap = h >= 12 ? 'PM' : 'AM';
         h = h % 12 || 12;
+        const today = new Date();
+        const ds = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+        const todays = (cal.upcoming || []).filter(e => e.startMs < ds + 86400000 && e.endMs > ds).length;
         nx.style.display = 'block';
         nx.innerHTML = '';
         const b = document.createElement('b');
@@ -221,7 +224,8 @@ async function refreshCal() {
         const sub = document.createElement('div');
         sub.className = 'hint';
         sub.textContent = `${h}:${m} ${ap} · ${d.getDate()}-${d.getMonth() + 1}-${d.getFullYear()}` +
-          (cal.next.location ? ` · ${cal.next.location}` : '');
+          (cal.next.location ? ` · ${cal.next.location}` : '') +
+          (todays > 1 ? ` · +${todays - 1} more today` : todays === 1 ? ' · only event today' : '');
         nx.append(b, sub);
       } else nx.style.display = 'none';
     }

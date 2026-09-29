@@ -42,7 +42,7 @@ function defaultDb() {
     weather: { temp: null, code: null, label: '—', updatedAt: 0 },
     time: { offsetSec: 0, updatedAt: 0 }, // dashboard clock = real time + offset (set from /admin)
     settings: { icsUrl: '' }, // Google Calendar private ICS URL (set from /admin)
-    calendar: { next: null, updatedAt: 0, error: null, configured: false },
+    calendar: { next: null, upcoming: [], updatedAt: 0, error: null, configured: false },
     users: [] // { user, salt, hash, createdAt } — created via first-boot setup page
   };
 }
@@ -60,7 +60,8 @@ let db = loadDb();
 if (!Array.isArray(db.users)) { db.users = []; saveDb(); }
 if (!db.time || typeof db.time.offsetSec !== 'number') { db.time = { offsetSec: 0, updatedAt: 0 }; saveDb(); }
 if (!db.settings || typeof db.settings.icsUrl !== 'string') { db.settings = { icsUrl: '' }; saveDb(); }
-if (!db.calendar || typeof db.calendar !== 'object') { db.calendar = { next: null, updatedAt: 0, error: null, configured: false }; saveDb(); }
+if (!db.calendar || typeof db.calendar !== 'object') { db.calendar = { next: null, upcoming: [], updatedAt: 0, error: null, configured: false }; saveDb(); }
+if (!Array.isArray(db.calendar.upcoming)) { db.calendar.upcoming = []; saveDb(); }
 // migrate old single long/short timer object -> named timers array
 if (db.timers && !Array.isArray(db.timers)) {
   const arr = [];
@@ -415,14 +416,18 @@ app.post('/api/time', adminAuth, (req, res) => {
 async function refreshCalendar() {
   const url = (db.settings.icsUrl || '').trim();
   if (!url) {
-    if (db.calendar.configured) { db.calendar = { next: null, updatedAt: 0, error: null, configured: false }; broadcast('calendar', db.calendar); }
+    if (db.calendar.configured) { db.calendar = { next: null, upcoming: [], updatedAt: 0, error: null, configured: false }; broadcast('calendar', db.calendar); }
     return;
   }
   try {
     const text = await ics.fetchIcs(url);
     const events = ics.parseIcs(text);
-    const next = ics.findNext(events, Date.now());
-    db.calendar = { next, updatedAt: Date.now(), error: null, configured: true };
+    const now = Date.now();
+    db.calendar = {
+      next: ics.findNext(events, now),
+      upcoming: ics.upcoming(events, now, 14, 100),
+      updatedAt: now, error: null, configured: true
+    };
     broadcast('calendar', db.calendar);
   } catch (e) {
     console.error('calendar refresh failed:', e.message);
