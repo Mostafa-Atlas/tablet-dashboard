@@ -59,6 +59,9 @@ body{margin:0;background:radial-gradient(1200px 600px at 50% -10%,#15151d 0%,var
 /* big centered empty states ("nothing to do, sir") */
 .empty-msg{display:block;text-align:center;font-size:22px;line-height:1.5;padding:20px 8px;list-style:none}
 li.empty-msg{border-bottom:none}
+#todos li.empty-msg{font-size:22px}
+/* breathing room between right-column sections */
+#life-card .mt{margin-top:30px;padding-top:18px;border-top:1px solid #202027}
 /* today: vertical timeline */
 .tl-wrap{min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding-right:2px}
 .tl-wrap::-webkit-scrollbar{width:6px} .tl-wrap::-webkit-scrollbar-thumb{background:#333;border-radius:99px}
