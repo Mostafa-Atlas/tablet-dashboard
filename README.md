@@ -75,6 +75,8 @@ Use Fully Kiosk Browser or Chrome. Set the start URL to `http://<lab-ip>:1200/` 
 
 Until the file is present, the tablet plays a built-in chime. Some browsers block automatic audio until you tap the page or allow autoplay for the dashboard site; if that happens, **Enable sound** appears inside an active alarm. Alerts stay visible even if sound is blocked. The alarm repeats until dismissed or snoozed; it covers timers and due tasks for 24 hours after their target time. Acknowledgements and snoozes are stored in that tablet browser.
 
+If the PC plays your MP3 but the tablet plays the built-in chime, open `http://<same-server-address>:1200/audio/alarm.mp3` on the tablet. It should play your exact file. If it does not, add the file to the server the tablet uses (and rebuild Docker if applicable), then reload the tablet page. If it does play, tap **Retry custom sound** inside the tablet alarm; the tablet browser may have blocked playback or taken too long to start the file. The admin sound test checks only the device where you press it.
+
 The admin session lasts seven days and is stored in that browser's local storage. The password is hashed with scrypt in `data/db.json`. Keep `data/` and `.env` private and back up the `data/` directory or use the JSON export regularly.
 
 ## Check and troubleshoot

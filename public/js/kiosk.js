@@ -351,7 +351,12 @@ function renderRoutines(routines) {
   });
 }
 let soundContext = null, fallbackLoop = null, soundAttempt = 0, customSoundFailed = false;
-const customSoundReady = fetch('/audio/alarm.mp3', { method: 'HEAD' }).then(r => r.ok).catch(() => false);
+async function customSoundReady() {
+  try {
+    const response = await within(fetch('/audio/alarm.mp3', { method: 'HEAD', cache: 'no-store' }), 5000);
+    return response.ok;
+  } catch { return false; }
+}
 let currentAlarm = null;
 const alarmMemory = (() => { try { return JSON.parse(localStorage.getItem('dashboard-alarms') || '{}'); } catch { return {}; } })();
 function saveAlarmMemory() { try { localStorage.setItem('dashboard-alarms', JSON.stringify(alarmMemory)); } catch {} }
@@ -371,9 +376,13 @@ function stopAlarmSound() {
   if (fallbackLoop) clearInterval(fallbackLoop);
   fallbackLoop = null;
 }
-function showSoundRecovery(show) {
+function showSoundRecovery(show, detail = 'Sound blocked by browser', action = 'Enable sound') {
   $('alarm-enable').hidden = !show;
   $('alarm-sound-help').hidden = !show;
+  if (show) {
+    $('alarm-sound-help').textContent = ` · ${detail}`;
+    $('alarm-enable').textContent = action;
+  }
 }
 function within(promise, ms) {
   return new Promise((resolve, reject) => {
@@ -392,10 +401,11 @@ async function startAlarmSound() {
     if (AudioContextClass) soundContext ||= new AudioContextClass();
     if (soundContext?.state === 'suspended') resume = soundContext.resume().catch(() => {});
   } catch { /* the custom MP3 can still play without Web Audio */ }
-  if (await customSoundReady && !customSoundFailed) {
+  const available = !customSoundFailed && await customSoundReady();
+  if (available) {
     if (stale()) return;
     try {
-      await within($('alarm-audio').play(), 1200);
+      await within($('alarm-audio').play(), 6000);
       if (stale()) { $('alarm-audio').pause(); return; }
       showSoundRecovery(false);
       return;
@@ -407,11 +417,12 @@ async function startAlarmSound() {
   if (resume) await Promise.race([resume, new Promise(resolve => setTimeout(resolve, 400))]);
   if (stale()) return;
   if (soundContext?.state === 'running') {
-    chime(); fallbackLoop = setInterval(chime, 2500); showSoundRecovery(false);
+    chime(); fallbackLoop = setInterval(chime, 2500);
+    showSoundRecovery(true, 'Custom sound unavailable; built-in chime is playing', 'Retry custom sound');
   } else showSoundRecovery(true);
 }
 $('alarm-audio').onerror = () => { customSoundFailed = true; if (currentAlarm && !fallbackLoop) startAlarmSound(); };
-$('alarm-enable').onclick = () => startAlarmSound();
+$('alarm-enable').onclick = () => { customSoundFailed = false; startAlarmSound(); };
 function updateAlarms() {
   const now = Date.now();
   const candidates = [];
@@ -422,7 +433,7 @@ function updateAlarms() {
   candidates.sort((a, b) => a.at - b.at);
   const next = candidates.find(a => !alarmMemory[a.id]?.dismissed && (!alarmMemory[a.id]?.snoozedUntil || alarmMemory[a.id].snoozedUntil <= now));
   if (next?.id === currentAlarm?.id) return;
-  stopAlarmSound(); currentAlarm = next || null;
+  stopAlarmSound(); customSoundFailed = false; currentAlarm = next || null;
   $('alarm-banner').hidden = !next;
   showSoundRecovery(false);
   if (next) {
