@@ -1,6 +1,7 @@
 // Admin with custom login page (token in localStorage, no browser Basic popup).
 const msg = t => document.getElementById('msg').textContent = t || '';
 const loginErr = t => document.getElementById('login-err').textContent = t || '';
+const setupErr = t => document.getElementById('setup-err').textContent = t || '';
 const getToken = () => localStorage.getItem('admin_token');
 
 async function authFetch(url, opts = {}) {
@@ -13,16 +14,45 @@ async function authFetch(url, opts = {}) {
   return r;
 }
 
+function showSetup() {
+  document.getElementById('setup-card').style.display = 'block';
+  document.getElementById('login-card').style.display = 'none';
+  document.getElementById('panel').style.display = 'none';
+}
 function showLogin(err) {
+  document.getElementById('setup-card').style.display = 'none';
   document.getElementById('login-card').style.display = 'block';
   document.getElementById('panel').style.display = 'none';
   if (err) loginErr(err);
 }
 function showPanel() {
+  document.getElementById('setup-card').style.display = 'none';
   document.getElementById('login-card').style.display = 'none';
   document.getElementById('panel').style.display = 'block';
   refresh();
 }
+
+async function doSetup() {
+  setupErr('');
+  const user = document.getElementById('setup-user').value.trim();
+  const pass = document.getElementById('setup-pass').value;
+  const pass2 = document.getElementById('setup-pass2').value;
+  if (pass !== pass2) { setupErr('Passwords do not match'); return; }
+  const btn = document.getElementById('setup-btn');
+  btn.disabled = true; btn.textContent = 'Creating…';
+  try {
+    const r = await fetch('/api/setup', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user, pass })
+    });
+    const j = await r.json();
+    if (!r.ok) { setupErr(j.error || 'Setup failed'); return; }
+    localStorage.setItem('admin_token', j.token);
+    showPanel();
+  } catch { setupErr('Cannot reach server'); }
+  finally { btn.disabled = false; btn.textContent = 'Create account'; }
+}
+document.getElementById('setup-btn').onclick = doSetup;
 
 async function doLogin() {
   loginErr('');
@@ -37,6 +67,7 @@ async function doLogin() {
       body: JSON.stringify({ user, pass })
     });
     const j = await r.json();
+    if (j.needsSetup) { showSetup(); return; }
     if (!r.ok) { loginErr(j.error || 'Login failed'); return; }
     localStorage.setItem('admin_token', j.token);
     document.getElementById('login-pass').value = '';
@@ -96,13 +127,24 @@ for (const [id, action] of [['sh-pause', 'pause'], ['sh-resume', 'resume'], ['sh
   };
 }
 
-// Boot: if token still valid, skip login.
+// Boot: setup -> login -> panel.
 (async () => {
-  const token = getToken();
-  if (!token) return showLogin();
+  let me = { loggedIn: false, needsSetup: false };
   try {
-    const r = await fetch('/api/me', { headers: { 'Authorization': 'Bearer ' + token } });
+    const token = getToken();
+    const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+    me = await (await fetch('/api/me', { headers })).json();
+  } catch { return showLogin('Cannot reach server'); }
+  if (me.needsSetup) return showSetup();
+  if (me.loggedIn) return showPanel();
+  // No valid session. If login says setup is needed (fresh DB), show setup.
+  try {
+    const r = await fetch('/api/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user: '', pass: '' })
+    });
     const j = await r.json();
-    if (j.loggedIn) showPanel(); else showLogin();
-  } catch { showLogin('Cannot reach server'); }
+    if (j.needsSetup) return showSetup();
+  } catch {}
+  showLogin();
 })();

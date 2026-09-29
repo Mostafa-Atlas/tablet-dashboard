@@ -14,16 +14,29 @@ button.ghost{background:#1c1c20;border-color:#333}
 .row{display:flex;gap:8px;margin:8px 0} .row input{flex:1}
 li{display:flex;gap:8px;align-items:center;padding:8px;border-bottom:1px solid #222}
 a{color:#8ab4ff}
-#login-card{max-width:380px;margin:12vh auto 0;padding:28px;background:#141417;border:1px solid #26262b;border-radius:16px;text-align:center}
-#login-card h1{margin:0 0 4px} #login-card input{width:100%;margin:8px 0}
-#login-card button{width:100%;margin-top:8px}
-#login-err{color:#ff9a9a;min-height:20px;font-size:14px}
-#panel{display:none}
+#login-card,#setup-card{max-width:380px;margin:12vh auto 0;padding:28px;background:#141417;border:1px solid #26262b;border-radius:16px;text-align:center}
+#login-card h1,#setup-card h1{margin:0 0 4px} #login-card input,#setup-card input{width:100%;margin:8px 0}
+#login-card button,#setup-card button{width:100%;margin-top:8px}
+#login-err,#setup-err{color:#ff9a9a;min-height:20px;font-size:14px}
+#login-card,#panel{display:none}
+#setup-card{display:none}
 .top{display:flex;justify-content:space-between;align-items:center}
 </style>
 </head>
 <body>
 <div class="wrap">
+  <!-- First boot: create the admin account (only shown when no user exists) -->
+  <div id="setup-card">
+    <h1>👋 Welcome</h1>
+    <p class="sub dim">Create your admin account to control the dashboard</p>
+    <input id="setup-user" placeholder="Choose a username" autocomplete="username" />
+    <input id="setup-pass" type="password" placeholder="Choose a password (min 6 chars)" autocomplete="new-password" />
+    <input id="setup-pass2" type="password" placeholder="Repeat password" autocomplete="new-password" />
+    <button id="setup-btn">Create account</button>
+    <p id="setup-err"></p>
+    <p><a href="/">← back to display</a></p>
+  </div>
+
   <!-- Custom login (no browser popup) -->
   <div id="login-card">
     <h1>🔒 Admin</h1>

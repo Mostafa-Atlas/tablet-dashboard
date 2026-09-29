@@ -31,7 +31,7 @@ node server.js
 
 Open:
 - Display → http://localhost:1200
-- Admin → http://localhost:1200/admin (user `admin`, pass `changeme123`)
+- Admin → http://localhost:1200/admin → create your account on first boot
 
 You should see mock/empty stats until the agent connects (pill shows `PC OFFLINE` — normal).
 
@@ -41,12 +41,17 @@ Copy `.env.example` → `.env` and edit:
 
 ```
 PORT=1200
-ADMIN_USER=admin
-ADMIN_PASS=changeme123        # change this!
 WEATHER_LAT=29.9668           # 6th of October
 WEATHER_LON=30.9333
 DATA_DIR=./data
+# Optional legacy fallback (only used if no account created yet via setup page):
+# ADMIN_USER=admin
+# ADMIN_PASS=changeme123
 ```
+
+> First boot: open `/admin` and **create your admin account** (username 3-32 chars, password min 6).
+> It's hashed (scrypt) and stored in `./data/db.json`. Setting `ADMIN_USER` + `ADMIN_PASS` env vars
+> enables an additional fallback login (for scripts/docker) — otherwise only created accounts work.
 
 Server listens on `0.0.0.0` so it works over LAN + Tailscale with no extra config.
 
@@ -126,6 +131,7 @@ Session lasts 7 days (token in browser localStorage). No browser popup — wrong
 | GET | `/api/timers` | no | `{ long, short }` |
 | POST | `/api/timers/long` | admin token (Bearer) | `{ days }` or `{ targetAt }` |
 | POST | `/api/timers/short` | admin token (Bearer) | `{ action: start\|pause\|resume\|reset, hours, mins }` |
+| POST | `/api/setup` | no (only when no users exist) | `{ user, pass }` → `{ token }` — first-boot create |
 | POST | `/api/login` | no | `{ user, pass }` → `{ token }` |
 | GET | `/api/me` | no | `{ loggedIn }` |
 | GET | `/api/weather` | no | cached Open-Meteo |
@@ -134,7 +140,7 @@ Session lasts 7 days (token in browser localStorage). No browser popup — wrong
 ## 9. Troubleshooting
 
 - **PC OFFLINE on tablet:** agent not reaching server. Check `$env:SERVER` uses lab IP, not localhost. `curl http://<lab-ip>:1200/api/health` from main PC.
-- **Can't log in on /admin:** use `ADMIN_USER`/`ADMIN_PASS` from `.env` or compose. Hit Log out to clear a stale token. Scripts can still use HTTP Basic on the API.
+- **Can't log in on /admin:** on first boot you must **create** the account on the setup screen — there is no default password. If you forgot it, stop the server, delete the `users` array in `./data/db.json` (or the whole file to reset), restart, and create a new one. Scripts can still use HTTP Basic on the API with the created account.
 - **Weather shows —:** no internet on server or Open-Meteo blocked. Server caches last value; check logs.
 - **Port in use:** change `PORT` in `.env` (e.g. `8090`).
 - **Push rejected:** repo is private — `git pull --rebase` then push, or use a PAT with `repo` scope.

@@ -7,8 +7,10 @@ const fs = require('fs');
 
 // ---- Config ----
 const PORT = process.env.PORT || 1200;
-const ADMIN_USER = process.env.ADMIN_USER || 'admin';
-const ADMIN_PASS = process.env.ADMIN_PASS || 'changeme123';
+// Optional legacy fallback login — ONLY active when both vars are explicitly set.
+// (Removed from compose/.env.example so first-boot setup page is the normal path.)
+const ENV_ADMIN_USER = process.env.ADMIN_USER || null;
+const ENV_ADMIN_PASS = process.env.ADMIN_PASS || null;
 // 6th of October City, Giza, Egypt
 const WEATHER_LAT = process.env.WEATHER_LAT || '29.9668';
 const WEATHER_LON = process.env.WEATHER_LON || '30.9333';
@@ -37,7 +39,8 @@ function defaultDb() {
       cpu: 0, ram: 0, gpu: 0, gpuTemp: null, cpuTemp: null,
       uptimeSec: 0, disks: [], updatedAt: 0
     },
-    weather: { temp: null, code: null, label: '—', updatedAt: 0 }
+    weather: { temp: null, code: null, label: '—', updatedAt: 0 },
+    users: [] // { user, salt, hash, createdAt } — created via first-boot setup page
   };
 }
 
@@ -50,6 +53,8 @@ function loadDb() {
   return d;
 }
 let db = loadDb();
+// migrate old db.json files that predate users[]
+if (!Array.isArray(db.users)) { db.users = []; saveDb(); }
 function saveDb() {
   fs.writeFile(DB_FILE, JSON.stringify(db, null, 2), () => {});
 }
@@ -63,6 +68,29 @@ function broadcast(type, data) {
     try { res.write(msg); } catch { sseClients.delete(res); }
   }
 }
+
+// ---- Password hashing (scrypt, stdlib only) ----
+function hashPass(pass, salt) {
+  salt = salt || crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(String(pass), salt, 64).toString('hex');
+  return { salt, hash };
+}
+function checkPass(pass, salt, hash) {
+  try {
+    const h = crypto.scryptSync(String(pass), salt, 64).toString('hex');
+    return crypto.timingSafeEqual(Buffer.from(h, 'hex'), Buffer.from(hash, 'hex'));
+  } catch { return false; }
+}
+// Returns true if creds match a stored user OR the explicit env fallback.
+function verifyUser(user, pass) {
+  if (!user || pass == null) return false;
+  const u = (db.users || []).find(x => x.user === String(user));
+  if (u) return checkPass(pass, u.salt, u.hash);
+  // env fallback only when explicitly configured (never the old hardcoded default)
+  if (ENV_ADMIN_USER && ENV_ADMIN_PASS) return user === ENV_ADMIN_USER && pass === ENV_ADMIN_PASS;
+  return false;
+}
+function needsSetup() { return (db.users || []).length === 0; }
 
 // ---- Token auth for /admin APIs (custom login page, no browser popup) ----
 const sessions = new Map(); // token -> expiresAt (ms)
@@ -88,12 +116,11 @@ function adminAuth(req, res, next) {
   const [scheme, cred] = h.split(' ');
   if (scheme === 'Bearer' && validToken(cred)) return next();
   if (scheme === 'Basic' && cred) {
-    const idx = Buffer.from(cred, 'base64').toString().indexOf(':');
-    if (idx >= 0) {
-      const u = Buffer.from(cred, 'base64').toString().slice(0, idx);
-      const p = Buffer.from(cred, 'base64').toString().slice(idx + 1);
-      if (u === ADMIN_USER && p === ADMIN_PASS) return next();
-    }
+    try {
+      const decoded = Buffer.from(cred, 'base64').toString();
+      const idx = decoded.indexOf(':');
+      if (idx >= 0 && verifyUser(decoded.slice(0, idx), decoded.slice(idx + 1))) return next();
+    } catch { /* bad base64 */ }
   }
   return res.status(401).json({ error: 'Login required' });
 }
@@ -104,10 +131,23 @@ app.get('/admin', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'admin.html'));
 });
 
-// ---- Login / logout / me ----
+// ---- First-boot setup + login / logout / me ----
+app.post('/api/setup', (req, res) => {
+  if (!needsSetup()) return res.status(403).json({ error: 'Admin already exists' });
+  const user = String(req.body.user || '').trim().slice(0, 32);
+  const pass = String(req.body.pass || '');
+  if (!/^[A-Za-z0-9_.-]{3,32}$/.test(user)) return res.status(400).json({ error: 'Username: 3-32 chars, letters/numbers/._-' });
+  if (pass.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  const { salt, hash } = hashPass(pass);
+  db.users.push({ user, salt, hash, createdAt: Date.now() });
+  saveDb();
+  const token = issueToken();
+  res.json({ ok: true, token, expiresInSec: Math.round(SESSION_TTL / 1000) });
+});
 app.post('/api/login', (req, res) => {
+  if (needsSetup()) return res.status(403).json({ error: 'No admin yet — create one first', needsSetup: true });
   const { user, pass } = req.body || {};
-  if (user === ADMIN_USER && pass === ADMIN_PASS) {
+  if (verifyUser(user, pass)) {
     const token = issueToken();
     return res.json({ ok: true, token, expiresInSec: Math.round(SESSION_TTL / 1000) });
   }
@@ -123,7 +163,7 @@ app.post('/api/logout', (req, res) => {
 app.get('/api/me', (req, res) => {
   const h = req.headers.authorization || '';
   const token = h.startsWith('Bearer ') ? h.slice(7) : null;
-  res.json({ loggedIn: validToken(token) });
+  res.json({ loggedIn: validToken(token), needsSetup: needsSetup() });
 });
 
 // ---- Health ----
@@ -258,5 +298,5 @@ function num(v, d) { const n = Number(v); return Number.isFinite(n) ? n : d; }
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`tablet-dashboard v0.1 on http://0.0.0.0:${PORT}  (LAN + Tailscale OK)`);
-  console.log(`kiosk: /   admin: /admin  user=${ADMIN_USER}`);
+  console.log(`kiosk: /   admin: /admin  ${needsSetup() ? 'NO ADMIN YET — open /admin to create one' : 'admin exists'}${ENV_ADMIN_USER ? ' (env fallback login enabled)' : ''}`);
 });

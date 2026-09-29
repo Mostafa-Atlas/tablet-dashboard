@@ -5,10 +5,9 @@ services:
       - "1200:1200"
     environment:
       - PORT=1200
-      - ADMIN_USER=admin
-      - ADMIN_PASS=changeme123
       - WEATHER_LAT=29.9668
       - WEATHER_LON=30.9333
+      # No ADMIN_USER/PASS here on purpose — create the account via /admin setup page.
     volumes:
       - ./data:/data
     restart: unless-stopped
