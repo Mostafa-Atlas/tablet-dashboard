@@ -1,23 +1,59 @@
 *{box-sizing:border-box} html,body{height:100%}
-body{margin:0;background:#0b0b0d;color:#f2f2f2;font-family:system-ui,Segoe UI,Roboto,Arial;overflow:hidden}
+:root{
+  --bg:#0b0b0e; --card:#141418; --line:#26262e; --txt:#f2f3f5; --dim:#9a9aa5;
+  --accent:#2b6cff; --accent2:#00d4ff; --good:#35d07f; --warn:#ffb02e; --bad:#ff5d5d;
+}
+body{margin:0;background:radial-gradient(1200px 600px at 50% -10%,#15151d 0%,var(--bg) 60%);color:var(--txt);font-family:system-ui,"Segoe UI",Roboto,Arial;overflow:hidden}
 #app{height:100vh;display:flex;flex-direction:column}
-#topbar{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;font-size:22px;border-bottom:1px solid #222;background:#111}
-#clock{font-weight:800;font-size:30px;margin-right:14px}
-#date{opacity:.7}
+/* topbar */
+#topbar{display:flex;justify-content:space-between;align-items:center;padding:12px 22px;font-size:22px;border-bottom:1px solid var(--line);background:rgba(17,17,22,.9);backdrop-filter:blur(6px)}
+#clock{font-weight:800;font-size:32px;margin-right:14px;font-variant-numeric:tabular-nums}
+#date{color:var(--dim)}
 .tb-right{display:flex;gap:12px;align-items:center}
-.pill{font-size:14px;padding:6px 12px;border-radius:999px;background:#222}
-.pill.ok{background:#123f22;color:#7dffa8} .pill.bad{background:#471111;color:#ff9a9a}
-#grid{flex:1;display:grid;grid-template-columns:300px 1fr 320px;gap:14px;padding:14px;min-height:0}
-.card{background:#141417;border:1px solid #26262b;border-radius:16px;padding:16px;overflow:hidden}
-.card h2{margin:0 0 10px;font-size:15px;text-transform:uppercase;letter-spacing:.12em;opacity:.6}
+#weather{font-size:19px;color:var(--txt)}
+.pill{font-size:13px;font-weight:700;letter-spacing:.06em;padding:7px 14px;border-radius:999px;background:#222}
+.pill.ok{background:rgba(53,208,127,.15);color:var(--good);border:1px solid rgba(53,208,127,.4)}
+.pill.bad{background:rgba(255,93,93,.12);color:var(--bad);border:1px solid rgba(255,93,93,.4)}
+/* layout */
+#grid{flex:1;display:grid;grid-template-columns:310px 1fr 330px;gap:14px;padding:14px;min-height:0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:18px;overflow:hidden;display:flex;flex-direction:column;min-height:0;box-shadow:0 8px 28px rgba(0,0,0,.35)}
+.card h2{margin:0 0 10px;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.14em;color:var(--dim)}
+.card h2.left{text-align:left}
 .card.center{text-align:center}
-#long-left{font-size:64px;font-weight:800;margin:6px 0}
-.short-row{display:flex;justify-content:space-between;font-size:28px;font-weight:700;margin-top:12px}
-.stat{margin:12px 0} .stat label{display:flex;justify-content:space-between;margin-bottom:6px;font-size:18px}
-.bar{height:14px;background:#242428;border-radius:999px;overflow:hidden}
-.bar.big{height:18px} .bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#2b6cff,#00d4ff);border-radius:999px;transition:width .5s}
-.sub{margin-top:10px;font-size:15px} .dim{opacity:.55} .mt{margin-top:16px}
-#todos{list-style:none;margin:0;padding:0} #todos li{padding:8px 0;border-bottom:1px solid #222;font-size:18px}
-#todos li.done{opacity:.45;text-decoration:line-through}
+/* stats */
+.stat{margin:12px 0} .stat label{display:flex;justify-content:space-between;margin-bottom:6px;font-size:17px} .stat b{font-variant-numeric:tabular-nums}
+.bar{height:12px;background:#232329;border-radius:999px;overflow:hidden}
+.bar.big{height:14px} .bar.small{height:9px}
+.bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:999px;transition:width .5s}
+.sub{margin-top:10px;font-size:14px} .dim{color:var(--dim)} .mt{margin-top:18px}
+/* storage rows */
+#disks{display:flex;flex-direction:column;gap:10px;margin-top:4px}
+.disk{background:#101014;border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.disk-label{display:flex;justify-content:space-between;font-size:15px;margin-bottom:7px} .disk-label b{font-variant-numeric:tabular-nums}
+.disk.full{border-color:rgba(255,93,93,.55)}
+.disk.full .disk-label b{color:var(--bad)}
+.disk .bar i{background:linear-gradient(90deg,#3ddc84,#00d4ff)}
+.disk.full .bar i{background:linear-gradient(90deg,#ff7a3d,var(--bad))}
+.disk-free{font-size:12px;margin-top:5px}
+/* timers */
+#timers{display:flex;flex-direction:column;gap:12px;overflow-y:auto;min-height:0;padding:2px;text-align:left}
+#timers::-webkit-scrollbar{width:6px} #timers::-webkit-scrollbar-thumb{background:#333;border-radius:99px}
+.timer{background:#101014;border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+.timer-head{display:flex;align-items:center;gap:10px;margin-bottom:4px}
+.timer-name{font-size:15px;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.timer-badge{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--dim);border:1px solid var(--line);border-radius:99px;padding:3px 10px}
+.timer-left{font-size:52px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.1;margin:2px 0 8px}
+.timer.short .timer-left{font-size:44px}
+.timer.fired{border-color:rgba(255,176,46,.6);animation:pulse 1.6s infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(255,176,46,.0)}50%{box-shadow:0 0 24px 0 rgba(255,176,46,.35)}}
+.timer.done{opacity:.55} .timer.done .timer-left{font-size:30px;color:var(--good)}
+/* checkbox look (display only on kiosk) */
+.chk{flex:none;width:20px;height:20px;border-radius:6px;border:2px solid #3a3a44;display:inline-flex;align-items:center;justify-content:center;font-size:14px;color:#fff}
+.chk.on{background:var(--good);border-color:var(--good)}
+/* todo */
+#todos{list-style:none;margin:0;padding:0}
+#todos li{display:flex;align-items:center;gap:12px;padding:11px 2px;border-bottom:1px solid #202027;font-size:18px}
+#todos li:last-child{border-bottom:none}
+#todos li.dim{border-bottom:none}
 /* 10" portrait / small fallback: stack */
-@media (max-width:900px){ #grid{grid-template-columns:1fr;overflow:hidden} .card{padding:12px} #long-left{font-size:48px} }
+@media (max-width:900px){ #grid{grid-template-columns:1fr;overflow-y:auto} .timer-left{font-size:40px} }

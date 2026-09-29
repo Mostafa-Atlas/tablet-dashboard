@@ -30,11 +30,10 @@ function defaultDb() {
       { id: '1', text: 'Test tablet in kiosk mode', done: false, createdAt: Date.now() },
       { id: '2', text: 'Set long-term timer from /admin', done: false, createdAt: Date.now() }
     ],
-    timers: {
-      // long: target timestamp (ms). short: duration + state managed client-side but persisted here
-      long: { label: 'Long term', targetAt: Date.now() + 12 * 24 * 3600 * 1000, createdAt: Date.now() },
-      short: { label: 'Focus', durationSec: 25 * 60, endsAt: null, pausedLeftSec: null }
-    },
+    timers: [
+      // { id, name, type: 'long'|'short', targetAt, createdAt, done, pausedLeftSec }
+      { id: 'long1', name: 'Long term', type: 'long', targetAt: Date.now() + 12 * 24 * 3600 * 1000, createdAt: Date.now(), done: false, pausedLeftSec: null }
+    ],
     pc: {
       cpu: 0, ram: 0, gpu: 0, gpuTemp: null, cpuTemp: null,
       uptimeSec: 0, disks: [], updatedAt: 0
@@ -55,6 +54,25 @@ function loadDb() {
 let db = loadDb();
 // migrate old db.json files that predate users[]
 if (!Array.isArray(db.users)) { db.users = []; saveDb(); }
+// migrate old single long/short timer object -> named timers array
+if (db.timers && !Array.isArray(db.timers)) {
+  const arr = [];
+  const old = db.timers;
+  if (old.long && old.long.targetAt) arr.push({
+    id: 'long' + Date.now().toString(36), name: String(old.long.label || 'Long term').slice(0, 60),
+    type: 'long', targetAt: Number(old.long.targetAt), createdAt: Number(old.long.createdAt) || Date.now(),
+    done: false, pausedLeftSec: null
+  });
+  if (old.short && (old.short.endsAt || old.short.pausedLeftSec != null)) {
+    const left = old.short.endsAt ? Math.max(0, Math.round((old.short.endsAt - Date.now()) / 1000)) : old.short.pausedLeftSec;
+    arr.push({
+      id: 'short' + Date.now().toString(36), name: String(old.short.label || 'Focus').slice(0, 60),
+      type: 'short', targetAt: old.short.endsAt ? Number(old.short.endsAt) : null,
+      createdAt: Date.now(), done: false, pausedLeftSec: old.short.endsAt ? null : left
+    });
+  }
+  db.timers = arr; saveDb();
+}
 function saveDb() {
   fs.writeFile(DB_FILE, JSON.stringify(db, null, 2), () => {});
 }
@@ -234,35 +252,111 @@ app.delete('/api/todos/:id', adminAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-// ---- Timers ----
-app.get('/api/timers', (req, res) => res.json(db.timers));
+// ---- Timers (multiple, each with a name) ----
+// Timer: { id, name, type: 'long'|'short', targetAt|null, createdAt, done, pausedLeftSec|null }
+// long  = target date (set days-from-now or a date) -> kiosk counts days left
+// short = same-day countdown (set duration H/M or a clock time like 18:30)
+function sortTimers(list) {
+  return [...list].sort((a, b) => {
+    if (!!a.done !== !!b.done) return a.done ? 1 : -1;
+    const at = a.targetAt || Infinity, bt = b.targetAt || Infinity;
+    return at - bt;
+  });
+}
+function makeTimerId() { return 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+app.get('/api/timers', (req, res) => res.json(sortTimers(db.timers || [])));
+app.post('/api/timers', adminAuth, (req, res) => {
+  const b = req.body || {};
+  const name = String(b.name || '').trim().slice(0, 60);
+  if (!name) return res.status(400).json({ error: 'name required' });
+  const type = b.type === 'short' ? 'short' : 'long';
+  let targetAt = null;
+  const extra = {};
+  if (type === 'long') {
+    if (b.targetAt) targetAt = Number(b.targetAt);
+    else if (b.date) { const t = new Date(b.date).getTime(); if (Number.isFinite(t)) targetAt = t; }
+    else if (b.days) targetAt = Date.now() + Number(b.days) * 24 * 3600 * 1000;
+    if (!targetAt || !Number.isFinite(targetAt)) return res.status(400).json({ error: 'days, date or targetAt required' });
+  } else {
+    if (b.atTime && /^\d{1,2}:\d{2}$/.test(String(b.atTime))) {
+      // clock time today (Africa/Cairo wall clock approximated via server local time)
+      const [hh, mm] = String(b.atTime).split(':').map(Number);
+      const d = new Date(); d.setHours(hh, mm, 0, 0);
+      targetAt = d.getTime();
+      if (targetAt <= Date.now()) targetAt += 24 * 3600 * 1000; // passed -> tomorrow
+    } else {
+      const h = Number(b.hours || 0), m = Number(b.mins || 0);
+      const dur = Math.max(60, h * 3600 + m * 60);
+      if (!Number.isFinite(dur)) return res.status(400).json({ error: 'hours/mins or atTime required' });
+      targetAt = Date.now() + dur * 1000;
+      extra.durationSec = Math.round(dur);
+    }
+  }
+  const t = { id: makeTimerId(), name, type, targetAt, createdAt: Date.now(), done: false, pausedLeftSec: null, ...extra };
+  db.timers = [...(db.timers || []), t].slice(-20);
+  saveDb(); broadcast('timers', sortTimers(db.timers));
+  res.json(t);
+});
+app.patch('/api/timers/:id', adminAuth, (req, res) => {
+  const t = (db.timers || []).find(x => x.id === req.params.id);
+  if (!t) return res.status(404).json({ error: 'not found' });
+  const b = req.body || {};
+  if (typeof b.name === 'string' && b.name.trim()) t.name = b.name.trim().slice(0, 60);
+  if (typeof b.done === 'boolean') t.done = b.done;
+  if (b.action === 'pause' && t.targetAt) {
+    t.pausedLeftSec = Math.max(0, Math.round((t.targetAt - Date.now()) / 1000));
+    t.targetAt = null;
+  } else if (b.action === 'resume' && t.pausedLeftSec != null) {
+    t.targetAt = Date.now() + t.pausedLeftSec * 1000; t.pausedLeftSec = null;
+  } else if (b.action === 'reset') {
+    t.targetAt = null; t.pausedLeftSec = null; t.done = false;
+  } else if (b.action === 'restart' && t.targetAt == null && t.pausedLeftSec == null) {
+    // re-arm a finished short with its original duration when known
+    if (typeof b.hours !== 'undefined' || typeof b.mins !== 'undefined') {
+      const dur = Math.max(60, Number(b.hours || 0) * 3600 + Number(b.mins || 0) * 60);
+      t.targetAt = Date.now() + dur * 1000; t.done = false;
+    }
+  }
+  saveDb(); broadcast('timers', sortTimers(db.timers));
+  res.json(t);
+});
+app.delete('/api/timers/:id', adminAuth, (req, res) => {
+  db.timers = (db.timers || []).filter(x => x.id !== req.params.id);
+  saveDb(); broadcast('timers', sortTimers(db.timers));
+  res.json({ ok: true });
+});
+// Legacy compat: old clients posting single long/short map onto named timers.
 app.post('/api/timers/long', adminAuth, (req, res) => {
-  // body: { days: number } or { targetAt: ms }
   let targetAt = req.body.targetAt;
   if (!targetAt && req.body.days) targetAt = Date.now() + Number(req.body.days) * 24 * 3600 * 1000;
   if (!targetAt) return res.status(400).json({ error: 'days or targetAt required' });
-  db.timers.long = { label: String(req.body.label || 'Long term').slice(0, 60), targetAt: Number(targetAt), createdAt: Date.now() };
-  saveDb(); broadcast('timers', db.timers);
-  res.json(db.timers.long);
+  const name = String(req.body.label || 'Long term').slice(0, 60);
+  let t = (db.timers || []).find(x => x.type === 'long' && x.name === name && !x.done);
+  if (t) { t.targetAt = Number(targetAt); }
+  else { t = { id: makeTimerId(), name, type: 'long', targetAt: Number(targetAt), createdAt: Date.now(), done: false, pausedLeftSec: null }; db.timers.push(t); }
+  saveDb(); broadcast('timers', sortTimers(db.timers));
+  res.json(t);
 });
 app.post('/api/timers/short', adminAuth, (req, res) => {
-  // body: { action: 'start'|'pause'|'resume'|'reset', hours, mins }
   const { action } = req.body;
-  const s = db.timers.short;
+  const name = String(req.body.label || 'Focus').slice(0, 60);
+  const shorts = (db.timers || []).filter(x => x.type === 'short');
+  let s = shorts.find(x => x.name === name && !x.done) || shorts.filter(x => !x.done).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
   if (action === 'start') {
     const h = Number(req.body.hours || 0), m = Number(req.body.mins || 25);
     const dur = Math.max(60, h * 3600 + m * 60);
-    s.durationSec = dur; s.endsAt = Date.now() + dur * 1000; s.pausedLeftSec = null;
-    s.label = String(req.body.label || 'Focus').slice(0, 60);
-  } else if (action === 'pause' && s.endsAt) {
-    s.pausedLeftSec = Math.max(0, Math.round((s.endsAt - Date.now()) / 1000));
-    s.endsAt = null;
+    if (s && s.name === name) { s.targetAt = Date.now() + dur * 1000; s.pausedLeftSec = null; s.done = false; s.durationSec = Math.round(dur); }
+    else { s = { id: makeTimerId(), name, type: 'short', targetAt: Date.now() + dur * 1000, createdAt: Date.now(), done: false, pausedLeftSec: null, durationSec: Math.round(dur) }; db.timers.push(s); }
+  } else if (!s) return res.status(404).json({ error: 'no short timer' });
+  else if (action === 'pause' && s.targetAt) {
+    s.pausedLeftSec = Math.max(0, Math.round((s.targetAt - Date.now()) / 1000));
+    s.targetAt = null;
   } else if (action === 'resume' && s.pausedLeftSec != null) {
-    s.endsAt = Date.now() + s.pausedLeftSec * 1000; s.pausedLeftSec = null;
+    s.targetAt = Date.now() + s.pausedLeftSec * 1000; s.pausedLeftSec = null;
   } else if (action === 'reset') {
-    s.endsAt = null; s.pausedLeftSec = null;
+    s.targetAt = null; s.pausedLeftSec = null;
   } else return res.status(400).json({ error: 'bad action' });
-  saveDb(); broadcast('timers', db.timers);
+  saveDb(); broadcast('timers', sortTimers(db.timers));
   res.json(s);
 });
 

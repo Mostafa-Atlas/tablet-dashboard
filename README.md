@@ -115,8 +115,11 @@ Open `http://<lab-ip>:1200/admin` and sign in on the custom login page (`ADMIN_U
 Session lasts 7 days (token in browser localStorage). No browser popup — wrong creds show an inline error.
 
 - **To-do:** add, check/uncheck, delete. Kiosk shows top 5 unchecked.
-- **Long timer:** enter days → Set (e.g. `12` = 12 days from now).
-- **Short timer:** hours + mins → Start / Pause / Resume / Reset.
+- **Timers (multiple, named):** pick 📅 Long or ⏱ Short, type a name, then:
+  - Long → days from now **or** a target date (kiosk shows `12d 4h` counting from today).
+  - Short → countdown hours/mins **or** a clock time today like `18:30` (kiosk counts down to it).
+  - All timers list below with a **checkbox** to mark done, tag, and delete. Done timers show ✓ on the kiosk.
+- **Storage:** per-disk bars on the kiosk turn red past 80%. Agent sends disks every 3h.
 
 ## 8. API reference
 
@@ -129,8 +132,10 @@ Session lasts 7 days (token in browser localStorage). No browser popup — wrong
 | GET | `/api/todos` | no | list |
 | POST/PATCH/DELETE | `/api/todos…` | admin token (Bearer) | mutate |
 | GET | `/api/timers` | no | `{ long, short }` |
-| POST | `/api/timers/long` | admin token (Bearer) | `{ days }` or `{ targetAt }` |
-| POST | `/api/timers/short` | admin token (Bearer) | `{ action: start\|pause\|resume\|reset, hours, mins }` |
+| GET | `/api/timers` | no | named timers array |
+| POST | `/api/timers` | admin token (Bearer) | `{ name, type: long\|short, days\|date\|targetAt, hours\|mins\|atTime }` |
+| PATCH | `/api/timers/:id` | admin token (Bearer) | `{ name?, done?, action: pause\|resume\|reset }` |
+| DELETE | `/api/timers/:id` | admin token (Bearer) | remove |
 | POST | `/api/setup` | no (only when no users exist) | `{ user, pass }` → `{ token }` — first-boot create |
 | POST | `/api/login` | no | `{ user, pass }` → `{ token }` |
 | GET | `/api/me` | no | `{ loggedIn }` |

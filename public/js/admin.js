@@ -83,16 +83,59 @@ async function refresh() {
   const ul = document.getElementById('list'); ul.innerHTML = '';
   todos.forEach(t => {
     const li = document.createElement('li');
+    if (t.done) li.className = 'done';
     const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!t.done;
     cb.onchange = async () => {
       await authFetch('/api/todos/' + t.id, { method: 'PATCH', body: JSON.stringify({ done: cb.checked }) });
       refresh();
     };
-    const sp = document.createElement('span'); sp.textContent = t.text; sp.style.flex = '1';
+    const sp = document.createElement('span'); sp.textContent = t.text; sp.className = 'grow';
     const del = document.createElement('button'); del.textContent = '✕'; del.className = 'ghost';
     del.onclick = async () => { await authFetch('/api/todos/' + t.id, { method: 'DELETE' }); refresh(); };
     li.append(cb, sp, del); ul.appendChild(li);
   });
+  refreshTimers();
+}
+
+async function refreshTimers() {
+  const r = await authFetch('/api/timers');
+  if (!r.ok) return;
+  const list = await r.json();
+  const ul = document.getElementById('timer-list'); ul.innerHTML = '';
+  if (!list.length) ul.innerHTML = '<li class="dim">No timers yet</li>';
+  list.forEach(t => {
+    const li = document.createElement('li');
+    if (t.done) li.className = 'done';
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!t.done; cb.title = 'mark done';
+    cb.onchange = async () => {
+      await authFetch('/api/timers/' + t.id, { method: 'PATCH', body: JSON.stringify({ done: cb.checked }) });
+      refreshTimers();
+    };
+    const sp = document.createElement('span'); sp.className = 'grow';
+    sp.textContent = `${t.done ? '✓ ' : ''}${t.name} — ${leftText(t)}`;
+    const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = t.type === 'long' ? '📅 long' : '⏱ short';
+    const del = document.createElement('button'); del.textContent = '✕'; del.className = 'ghost';
+    del.onclick = async () => { await authFetch('/api/timers/' + t.id, { method: 'DELETE' }); refreshTimers(); };
+    li.append(cb, sp, tag, del); ul.appendChild(li);
+  });
+}
+function leftText(t) {
+  if (t.done) return 'done';
+  let ms = null;
+  if (t.targetAt) ms = t.targetAt - Date.now();
+  else if (t.pausedLeftSec != null) return 'paused ' + fmtDur(t.pausedLeftSec);
+  else return 'not set';
+  if (ms <= 0) return 'finished';
+  const s = Math.round(ms / 1000);
+  if (t.type === 'long') {
+    const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600);
+    return d >= 1 ? `${d}d ${h}h left` : fmtDur(s) + ' left';
+  }
+  return fmtDur(s) + ' left';
+}
+function fmtDur(sec) {
+  const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+  return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s).padStart(2, '0');
 }
 
 document.getElementById('login-btn').onclick = doLogin;
@@ -110,22 +153,59 @@ document.getElementById('todo-add').onclick = async () => {
   if (!r.ok) { msg('Failed — are you logged in?'); return; }
   el.value = ''; msg('Added ✓'); refresh();
 };
-document.getElementById('long-set').onclick = async () => {
-  const days = Number(document.getElementById('long-days').value || 0);
-  await authFetch('/api/timers/long', { method: 'POST', body: JSON.stringify({ days }) });
-  msg('Long timer set ✓');
-};
-document.getElementById('sh-start').onclick = async () => {
-  await authFetch('/api/timers/short', { method: 'POST',
-    body: JSON.stringify({ action: 'start', hours: Number(document.getElementById('sh-h').value || 0), mins: Number(document.getElementById('sh-m').value || 0) }) });
-  msg('Short timer started ✓');
-};
-for (const [id, action] of [['sh-pause', 'pause'], ['sh-resume', 'resume'], ['sh-reset', 'reset']]) {
-  document.getElementById(id).onclick = async () => {
-    await authFetch('/api/timers/short', { method: 'POST', body: JSON.stringify({ action }) });
-    msg('Short timer: ' + action + ' ✓');
-  };
+
+/* ---- timers: named, multi, long (days/date) + short (duration/clock time) ---- */
+let timerType = 'long';
+const typeLongBtn = document.getElementById('type-long');
+const typeShortBtn = document.getElementById('type-short');
+function setTimerType(t) {
+  timerType = t;
+  typeLongBtn.classList.toggle('on', t === 'long');
+  typeShortBtn.classList.toggle('on', t === 'short');
+  document.getElementById('long-inputs').style.display = t === 'long' ? 'block' : 'none';
+  document.getElementById('short-inputs').style.display = t === 'short' ? 'block' : 'none';
 }
+typeLongBtn.onclick = () => setTimerType('long');
+typeShortBtn.onclick = () => setTimerType('short');
+
+function timerName() {
+  const el = document.getElementById('tm-name');
+  if (!el.value.trim()) { msg('Give the timer a name first'); return null; }
+  return el.value.trim();
+}
+document.getElementById('tm-long-set').onclick = async () => {
+  const name = timerName(); if (!name) return;
+  const days = Number(document.getElementById('tm-days').value || 0);
+  const r = await authFetch('/api/timers', { method: 'POST', body: JSON.stringify({ name, type: 'long', days }) });
+  if (!r.ok) { msg((await r.json()).error || 'Failed'); return; }
+  msg(`"${name}" set ✓`); refreshTimers();
+};
+document.getElementById('tm-date-set').onclick = async () => {
+  const name = timerName(); if (!name) return;
+  const date = document.getElementById('tm-date').value;
+  if (!date) { msg('Pick a date first'); return; }
+  const r = await authFetch('/api/timers', { method: 'POST', body: JSON.stringify({ name, type: 'long', date }) });
+  if (!r.ok) { msg((await r.json()).error || 'Failed'); return; }
+  msg(`"${name}" set ✓`); refreshTimers();
+};
+document.getElementById('tm-short-start').onclick = async () => {
+  const name = timerName(); if (!name) return;
+  const r = await authFetch('/api/timers', { method: 'POST', body: JSON.stringify({
+    name, type: 'short',
+    hours: Number(document.getElementById('tm-h').value || 0),
+    mins: Number(document.getElementById('tm-m').value || 0)
+  }) });
+  if (!r.ok) { msg((await r.json()).error || 'Failed'); return; }
+  msg(`"${name}" started ✓`); refreshTimers();
+};
+document.getElementById('tm-at-start').onclick = async () => {
+  const name = timerName(); if (!name) return;
+  const atTime = document.getElementById('tm-at').value;
+  if (!atTime) { msg('Pick a time first'); return; }
+  const r = await authFetch('/api/timers', { method: 'POST', body: JSON.stringify({ name, type: 'short', atTime }) });
+  if (!r.ok) { msg((await r.json()).error || 'Failed'); return; }
+  msg(`"${name}" counts down to ${atTime} ✓`); refreshTimers();
+};
 
 // Boot: setup -> login -> panel.
 (async () => {

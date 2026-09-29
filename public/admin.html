@@ -11,8 +11,12 @@ body{overflow:auto}
 input,button{font-size:16px;padding:10px;border-radius:10px;border:1px solid #333;background:#161616;color:#fff}
 button{background:#2b6cff;border-color:#2b6cff;cursor:pointer}
 button.ghost{background:#1c1c20;border-color:#333}
+button.ghost.on{border-color:#2b6cff;color:#8ab4ff}
 .row{display:flex;gap:8px;margin:8px 0} .row input{flex:1}
 li{display:flex;gap:8px;align-items:center;padding:8px;border-bottom:1px solid #222}
+li .grow{flex:1} li.done .grow{opacity:.5;text-decoration:line-through}
+.tag{font-size:11px;padding:3px 9px;border:1px solid #333;border-radius:99px;color:#9a9aa5}
+.wrap{max-width:640px}
 a{color:#8ab4ff}
 #login-card,#setup-card{max-width:380px;margin:12vh auto 0;padding:28px;background:#141417;border:1px solid #26262b;border-radius:16px;text-align:center}
 #login-card h1,#setup-card h1{margin:0 0 4px} #login-card input,#setup-card input{width:100%;margin:8px 0}
@@ -60,20 +64,29 @@ a{color:#8ab4ff}
     <div class="row"><input id="todo-text" placeholder="New task…" /><button id="todo-add">Add</button></div>
     <ul id="list"></ul>
 
-    <h2>Long timer (days)</h2>
-    <div class="row"><input id="long-days" type="number" value="12" min="1" /><button id="long-set">Set</button></div>
+    <h2>New timer</h2>
+    <div class="row"><input id="tm-name" placeholder="Timer name (e.g. Exams, Gym)…" /></div>
+    <div class="row">
+      <button id="type-long" class="ghost on">📅 Long (days)</button>
+      <button id="type-short" class="ghost">⏱ Short (today)</button>
+    </div>
+    <div id="long-inputs">
+      <div class="row"><input id="tm-days" type="number" value="12" min="1" placeholder="days from now" /><button id="tm-long-set">Set</button></div>
+      <div class="row"><input id="tm-date" type="date" /><button id="tm-date-set">Set date</button></div>
+      <p class="sub dim">Enter days from now <b>or</b> pick a target date — it calculates days left from today.</p>
+    </div>
+    <div id="short-inputs" style="display:none">
+      <div class="row">
+        <input id="tm-h" type="number" value="0" min="0" max="12" placeholder="hours" />
+        <input id="tm-m" type="number" value="25" min="0" max="600" placeholder="mins" />
+        <button id="tm-short-start">Start</button>
+      </div>
+      <div class="row"><input id="tm-at" type="time" /><button id="tm-at-start">At time</button></div>
+      <p class="sub dim">Countdown <b>or</b> a clock time today (e.g. 18:30) — it counts down to it.</p>
+    </div>
 
-    <h2>Short timer</h2>
-    <div class="row">
-      <input id="sh-h" type="number" value="0" min="0" max="12" placeholder="h" />
-      <input id="sh-m" type="number" value="25" min="1" max="600" placeholder="m" />
-      <button id="sh-start">Start</button>
-    </div>
-    <div class="row">
-      <button id="sh-pause" class="ghost">Pause</button>
-      <button id="sh-resume" class="ghost">Resume</button>
-      <button id="sh-reset" class="ghost">Reset</button>
-    </div>
+    <h2>All timers</h2>
+    <ul id="timer-list"></ul>
     <p id="msg" class="sub"></p>
   </div>
 </div>
