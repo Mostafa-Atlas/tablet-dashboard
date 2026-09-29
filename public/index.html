@@ -14,7 +14,11 @@
       <span id="date">—</span>
     </div>
     <div class="tb-right">
-      <span id="weather">--°C —</span>
+      <span id="weather" class="weather-summary">
+        <svg id="weather-icon" viewBox="0 0 48 48" aria-hidden="true" hidden><use id="weather-icon-use" href="/icons/weather.svg#cloudy"></use></svg>
+        <span id="weather-text">—</span>
+        <a class="weather-credit" href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo</a>
+      </span>
       <span id="dashboard-state" class="pill bad">CONNECTING</span>
       <span id="pc-state" class="pill">PC …</span>
     </div>

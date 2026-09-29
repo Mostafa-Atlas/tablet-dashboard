@@ -18,6 +18,7 @@ node server.js
 Open `http://localhost:1200/admin` and create an admin account. Open `http://localhost:1200/` for the display. Use `http://<server-LAN-or-Tailscale-IP>:1200/` on the tablet. The first display shows sample tasks and a timer until you replace them in admin.
 
 The server listens on `0.0.0.0`; allow port 1200 only on the network you intend to use. Change `PORT` in `.env` if needed. Weather defaults to 6th of October City, Giza; change `WEATHER_LAT` and `WEATHER_LON` in `.env` for another location.
+Weather uses Open-Meteo's current conditions, refreshes every 30 minutes, and shows local SVG icons that change between day and night. The tablet links to Open-Meteo for data attribution. The free API is intended for non-commercial use.
 
 ## Run with Docker on the home lab
 

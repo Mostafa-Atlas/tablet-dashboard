@@ -43,7 +43,7 @@ function defaultDb() {
       cpu: 0, ram: 0, gpu: 0, gpuTemp: null, cpuTemp: null,
       uptimeSec: 0, disks: [], updatedAt: 0
     },
-    weather: { temp: null, code: null, label: '—', updatedAt: 0 },
+    weather: { temp: null, code: null, label: '—', isDay: null, updatedAt: 0 },
     time: { offsetSec: 0, updatedAt: 0 }, // dashboard clock = real time + offset (set from /admin)
     settings: { icsUrl: '' }, // Google Calendar private ICS URL (set from /admin)
     calendar: { next: null, upcoming: [], updatedAt: 0, error: null, configured: false },
@@ -675,24 +675,30 @@ app.post('/api/timers/short', adminAuth, (req, res) => {
 
 // ---- Weather (Open-Meteo, cached 30 min). 6th October city coords ----
 const WEATHER_META = {
-  0: ['Clear', '☀️'], 1: ['Mostly clear', '🌤️'], 2: ['Partly cloudy', '⛅'], 3: ['Overcast', '☁️'],
-  45: ['Fog', '🌫️'], 48: ['Fog', '🌫️'],
-  51: ['Drizzle', '🌦️'], 53: ['Drizzle', '🌦️'], 55: ['Drizzle', '🌦️'], 56: ['Freezing drizzle', '🌧️'], 57: ['Freezing drizzle', '🌧️'],
-  61: ['Rain', '🌧️'], 63: ['Rain', '🌧️'], 65: ['Heavy rain', '🌧️'], 66: ['Freezing rain', '🌧️'], 67: ['Freezing rain', '🌧️'],
-  71: ['Snow', '🌨️'], 73: ['Snow', '🌨️'], 75: ['Heavy snow', '🌨️'], 77: ['Snow grains', '🌨️'],
-  80: ['Showers', '🌦️'], 81: ['Showers', '🌦️'], 82: ['Heavy showers', '🌧️'], 85: ['Snow showers', '🌨️'], 86: ['Snow showers', '🌨️'],
-  95: ['Storm', '⛈️'], 96: ['Storm + hail', '⛈️'], 99: ['Storm + hail', '⛈️']
+  0: 'Clear', 1: 'Mostly clear', 2: 'Partly cloudy', 3: 'Overcast',
+  45: 'Fog', 48: 'Fog',
+  51: 'Drizzle', 53: 'Drizzle', 55: 'Drizzle', 56: 'Freezing drizzle', 57: 'Freezing drizzle',
+  61: 'Rain', 63: 'Rain', 65: 'Heavy rain', 66: 'Freezing rain', 67: 'Freezing rain',
+  71: 'Snow', 73: 'Snow', 75: 'Heavy snow', 77: 'Snow grains',
+  80: 'Showers', 81: 'Showers', 82: 'Heavy showers', 85: 'Snow showers', 86: 'Snow showers',
+  95: 'Storm', 96: 'Storm + hail', 99: 'Storm + hail'
 };
 async function refreshWeather() {
   try {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${WEATHER_LAT}&longitude=${WEATHER_LON}&current=temperature_2m,weather_code&timezone=Africa%2FCairo`;
-    const r = await fetch(url);
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${WEATHER_LAT}&longitude=${WEATHER_LON}&current=temperature_2m,weather_code,is_day&timezone=Africa%2FCairo`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (!r.ok) throw new Error(`Open-Meteo HTTP ${r.status}`);
     const j = await r.json();
-    const [label, icon] = WEATHER_META[j.current.weather_code] || ['—', '🌡️'];
+    const temp = Number(j.current?.temperature_2m);
+    const code = Number(j.current?.weather_code);
+    if (j.current?.temperature_2m == null || j.current?.weather_code == null || !Number.isFinite(temp) || !Number.isInteger(code)) {
+      throw new Error('Invalid Open-Meteo response');
+    }
     db.weather = {
-      temp: Math.round(j.current.temperature_2m),
-      code: j.current.weather_code,
-      label, icon,
+      temp: Math.round(temp),
+      code,
+      label: WEATHER_META[code] || 'Weather',
+      isDay: j.current.is_day == null ? null : Number(j.current.is_day) === 1,
       updatedAt: Date.now()
     };
     broadcast('weather', db.weather);

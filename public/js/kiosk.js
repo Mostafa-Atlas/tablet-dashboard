@@ -200,10 +200,29 @@ function fmt(sec) {
 }
 setInterval(() => { tickTimers(); updateAlarms(); }, 1000);
 
+function weatherSymbol(w) {
+  const code = Number(w.code);
+  const phase = w.isDay === false ? 'night' : 'day';
+  if (code === 0) return `clear-${phase}`;
+  if (code === 1 || code === 2) return `partly-${phase}`;
+  if (code === 3) return 'cloudy';
+  if (code === 45 || code === 48) return 'fog';
+  if (code >= 51 && code <= 57) return 'drizzle';
+  if ((code >= 61 && code <= 67) || (code >= 80 && code <= 82)) return 'rain';
+  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return 'snow';
+  if (code >= 95 && code <= 99) return 'storm';
+  return 'cloudy';
+}
 function renderWeather(w) {
-  if (!w || w.temp == null) { $('weather').textContent = '—'; return; }
+  if (!w || w.temp == null) {
+    $('weather-icon').setAttribute('hidden', '');
+    $('weather-text').textContent = 'Weather unavailable';
+    return;
+  }
   const stale = Date.now() + serverClockOffsetMs - (w.updatedAt || 0) > 90 * 60 * 1000;
-  $('weather').textContent = `${w.icon ? w.icon + ' ' : ''}${w.temp}°C ${w.label || ''}${stale ? ' · stale' : ''}`;
+  $('weather-icon-use').setAttribute('href', `/icons/weather.svg#${weatherSymbol(w)}`);
+  $('weather-icon').removeAttribute('hidden');
+  $('weather-text').textContent = `${w.temp}°C ${w.label || 'Weather'}${stale ? ' · stale' : ''}`;
 }
 
 function renderTime(t) {

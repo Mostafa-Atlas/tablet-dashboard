@@ -19,6 +19,10 @@ body{margin:0;background:radial-gradient(1200px 600px at 50% -10%,#15151d 0%,var
 #date{color:var(--dim)}
 .tb-right{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 #weather{font-size:19px;color:var(--txt)}
+.weather-summary{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+#weather-icon{width:30px;height:30px;flex:none}
+.weather-credit{font-size:11px;color:#8da8d1;text-decoration:none;align-self:center}
+.weather-credit:hover,.weather-credit:focus-visible{text-decoration:underline}
 .pill{font-size:13px;font-weight:700;letter-spacing:.06em;padding:7px 14px;border-radius:999px;background:#222}
 .pill.ok{background:rgba(53,208,127,.15);color:var(--good);border:1px solid rgba(53,208,127,.4)}
 .pill.bad{background:rgba(255,93,93,.12);color:var(--bad);border:1px solid rgba(255,93,93,.4)}
