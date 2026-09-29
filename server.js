@@ -4,6 +4,7 @@ const cors = require('cors');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
+const ics = require('./lib/ics');
 
 // ---- Config ----
 const PORT = process.env.PORT || 1200;
@@ -40,6 +41,8 @@ function defaultDb() {
     },
     weather: { temp: null, code: null, label: '—', updatedAt: 0 },
     time: { offsetSec: 0, updatedAt: 0 }, // dashboard clock = real time + offset (set from /admin)
+    settings: { icsUrl: '' }, // Google Calendar private ICS URL (set from /admin)
+    calendar: { next: null, updatedAt: 0, error: null, configured: false },
     users: [] // { user, salt, hash, createdAt } — created via first-boot setup page
   };
 }
@@ -56,6 +59,8 @@ let db = loadDb();
 // migrate old db.json files that predate users[]
 if (!Array.isArray(db.users)) { db.users = []; saveDb(); }
 if (!db.time || typeof db.time.offsetSec !== 'number') { db.time = { offsetSec: 0, updatedAt: 0 }; saveDb(); }
+if (!db.settings || typeof db.settings.icsUrl !== 'string') { db.settings = { icsUrl: '' }; saveDb(); }
+if (!db.calendar || typeof db.calendar !== 'object') { db.calendar = { next: null, updatedAt: 0, error: null, configured: false }; saveDb(); }
 // migrate old single long/short timer object -> named timers array
 if (db.timers && !Array.isArray(db.timers)) {
   const arr = [];
@@ -206,7 +211,7 @@ app.get('/api/stream', (req, res) => {
 });
 
 function snapshot() {
-  return { now: Date.now(), pc: db.pc, todos: db.todos, timers: db.timers, weather: db.weather, time: db.time };
+  return { now: Date.now(), pc: db.pc, todos: db.todos, timers: db.timers, weather: db.weather, time: db.time, calendar: db.calendar };
 }
 app.get('/api/snapshot', (req, res) => res.json(snapshot()));
 
@@ -406,10 +411,39 @@ app.post('/api/time', adminAuth, (req, res) => {
   saveDb(); broadcast('time', db.time);
   res.json({ offsetSec: db.time.offsetSec, dashboardNow: Date.now() + db.time.offsetSec * 1000 });
 });
-// ---- Calendar placeholder (Google Calendar OAuth comes in v0.2) ----
-app.get('/api/calendar', (req, res) => {
-  res.json({ next: null, note: 'Connect Google Calendar in v0.2 (OAuth/ICS).' });
+// ---- Google Calendar via private ICS URL (poll every 10 min) ----
+async function refreshCalendar() {
+  const url = (db.settings.icsUrl || '').trim();
+  if (!url) {
+    if (db.calendar.configured) { db.calendar = { next: null, updatedAt: 0, error: null, configured: false }; broadcast('calendar', db.calendar); }
+    return;
+  }
+  try {
+    const text = await ics.fetchIcs(url);
+    const events = ics.parseIcs(text);
+    const next = ics.findNext(events, Date.now());
+    db.calendar = { next, updatedAt: Date.now(), error: null, configured: true };
+    broadcast('calendar', db.calendar);
+  } catch (e) {
+    console.error('calendar refresh failed:', e.message);
+    db.calendar.error = String(e.message || e).slice(0, 160);
+    db.calendar.configured = true;
+    broadcast('calendar', db.calendar);
+  }
+}
+app.get('/api/calendar', (req, res) => res.json(db.calendar));
+// ICS URL is secret (full read access) -> admin only, never sent to kiosk.
+app.get('/api/settings', adminAuth, (req, res) => res.json({ icsUrl: db.settings.icsUrl || '' }));
+app.post('/api/settings', adminAuth, async (req, res) => {
+  const icsUrl = String(req.body.icsUrl || '').trim().slice(0, 2000);
+  if (icsUrl && !/^https?:\/\/.+[./]/.test(icsUrl)) return res.status(400).json({ error: 'Must be an http(s) URL' });
+  db.settings.icsUrl = icsUrl;
+  saveDb();
+  await refreshCalendar();
+  res.json({ ok: true, calendar: db.calendar });
 });
+refreshCalendar();
+setInterval(refreshCalendar, 10 * 60 * 1000);
 
 function num(v, d) { const n = Number(v); return Number.isFinite(n) ? n : d; }
 

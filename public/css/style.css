@@ -55,5 +55,9 @@ body{margin:0;background:radial-gradient(1200px 600px at 50% -10%,#15151d 0%,var
 #todos li{display:flex;align-items:center;gap:12px;padding:11px 2px;border-bottom:1px solid #202027;font-size:18px}
 #todos li:last-child{border-bottom:none}
 #todos li.dim{border-bottom:none}
+/* next event */
+.event-title{font-size:19px;font-weight:700}
+.event-title.live{color:var(--good)}
+.event-sub{font-size:14px;color:var(--dim);margin-top:4px;font-variant-numeric:tabular-nums}
 /* 10" portrait / small fallback: stack */
 @media (max-width:900px){ #grid{grid-template-columns:1fr;overflow-y:auto} .timer-left{font-size:40px} }

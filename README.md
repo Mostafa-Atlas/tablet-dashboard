@@ -121,6 +121,7 @@ Session lasts 7 days (token in browser localStorage). No browser popup — wrong
   - All timers list below with a **checkbox** to mark done, tag, and delete. Done timers show ✓ on the kiosk.
 - **Storage:** per-disk bars on the kiosk turn red past 80%. Agent sends disks every 3h.
 - **Dashboard time:** pick date + time in `/admin` to shift the kiosk clock (shows day-month-year like `12-1-2026`), or reset to real time. Only the clock display shifts — timers keep real time.
+- **Google Calendar:** paste your calendar's **Secret address in iCal format** (Calendar Settings → Integrate calendar) into the `/admin` Calendar card → Connect. Tablet shows the next event (`in 2h · 3:30 PM`), refreshed every 10 min. Supports recurring events. The URL stays server-side — never sent to the tablet.
 
 ## 8. API reference
 
@@ -141,7 +142,9 @@ Session lasts 7 days (token in browser localStorage). No browser popup — wrong
 | POST | `/api/login` | no | `{ user, pass }` → `{ token }` |
 | GET | `/api/me` | no | `{ loggedIn }` |
 | GET | `/api/weather` | no | cached Open-Meteo |
-| GET | `/api/calendar` | no | placeholder, real OAuth in v0.2 |
+| GET | `/api/calendar` | no | `{ next, updatedAt, error, configured }` (no secret URL) |
+| GET | `/api/settings` | admin token | `{ icsUrl }` |
+| POST | `/api/settings` | admin token | `{ icsUrl }` → saves + refreshes calendar |
 
 ## 9. Troubleshooting
 

@@ -1,5 +1,12 @@
 // Admin with custom login page (token in localStorage, no browser Basic popup).
-const msg = t => document.getElementById('msg').textContent = t || '';
+let msgTimer = null;
+const msg = t => {
+  const el = document.getElementById('msg');
+  el.textContent = t || '';
+  el.classList.toggle('show', !!t);
+  clearTimeout(msgTimer);
+  if (t) msgTimer = setTimeout(() => el.classList.remove('show'), 2600);
+};
 const loginErr = t => document.getElementById('login-err').textContent = t || '';
 const setupErr = t => document.getElementById('setup-err').textContent = t || '';
 const getToken = () => localStorage.getItem('admin_token');
@@ -15,19 +22,19 @@ async function authFetch(url, opts = {}) {
 }
 
 function showSetup() {
-  document.getElementById('setup-card').style.display = 'block';
-  document.getElementById('login-card').style.display = 'none';
+  document.getElementById('setup-shell').style.display = 'block';
+  document.getElementById('login-shell').style.display = 'none';
   document.getElementById('panel').style.display = 'none';
 }
 function showLogin(err) {
-  document.getElementById('setup-card').style.display = 'none';
-  document.getElementById('login-card').style.display = 'block';
+  document.getElementById('setup-shell').style.display = 'none';
+  document.getElementById('login-shell').style.display = 'block';
   document.getElementById('panel').style.display = 'none';
   if (err) loginErr(err);
 }
 function showPanel() {
-  document.getElementById('setup-card').style.display = 'none';
-  document.getElementById('login-card').style.display = 'none';
+  document.getElementById('setup-shell').style.display = 'none';
+  document.getElementById('login-shell').style.display = 'none';
   document.getElementById('panel').style.display = 'block';
   refresh();
 }
@@ -95,6 +102,7 @@ async function refresh() {
   });
   refreshTimers();
   refreshTime();
+  refreshCal();
 }
 
 async function refreshTimers() {
@@ -178,6 +186,58 @@ document.getElementById('time-set').onclick = async () => {
 document.getElementById('time-reset').onclick = async () => {
   await authFetch('/api/time', { method: 'POST', body: JSON.stringify({ action: 'reset' }) });
   msg('Back to real time ✓'); refreshTime();
+};
+
+/* ---- google calendar (private ICS url) ---- */
+async function refreshCal() {
+  try {
+    const s = await authFetch('/api/settings');
+    if (!s.ok) return;
+    const set = await s.json();
+    const inp = document.getElementById('cal-ics');
+    if (document.activeElement !== inp) inp.value = set.icsUrl || '';
+    const cal = await (await fetch('/api/calendar')).json();
+    const st = document.getElementById('cal-status');
+    const nx = document.getElementById('cal-next');
+    if (!set.icsUrl) {
+      st.innerHTML = '<span class="bad-dot">●</span> not connected';
+      nx.style.display = 'none';
+    } else if (cal.error && !cal.next) {
+      st.textContent = '';
+      st.appendChild(Object.assign(document.createElement('span'), { className: 'bad-dot', textContent: '●' }));
+      st.appendChild(document.createTextNode(' error — will retry'));
+      nx.style.display = 'none';
+    } else {
+      st.innerHTML = '<span class="ok-dot">●</span> connected';
+      if (cal.next) {
+        const d = new Date(cal.next.startMs);
+        let h = d.getHours(), m = String(d.getMinutes()).padStart(2, '0');
+        const ap = h >= 12 ? 'PM' : 'AM';
+        h = h % 12 || 12;
+        nx.style.display = 'block';
+        nx.innerHTML = '';
+        const b = document.createElement('b');
+        b.textContent = `Next: ${cal.next.summary}`;
+        const sub = document.createElement('div');
+        sub.className = 'hint';
+        sub.textContent = `${h}:${m} ${ap} · ${d.getDate()}-${d.getMonth() + 1}-${d.getFullYear()}` +
+          (cal.next.location ? ` · ${cal.next.location}` : '');
+        nx.append(b, sub);
+      } else nx.style.display = 'none';
+    }
+  } catch {}
+}
+document.getElementById('cal-save').onclick = async () => {
+  const v = document.getElementById('cal-ics').value.trim();
+  if (!v) { msg('Paste the ICS URL first'); return; }
+  const r = await authFetch('/api/settings', { method: 'POST', body: JSON.stringify({ icsUrl: v }) });
+  if (!r.ok) { msg((await r.json()).error || 'Failed'); return; }
+  msg('Calendar connected ✓'); refreshCal();
+};
+document.getElementById('cal-clear').onclick = async () => {
+  await authFetch('/api/settings', { method: 'POST', body: JSON.stringify({ icsUrl: '' }) });
+  document.getElementById('cal-ics').value = '';
+  msg('Calendar disconnected'); refreshCal();
 };
 let timerType = 'long';
 const typeLongBtn = document.getElementById('type-long');

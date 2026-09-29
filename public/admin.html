@@ -6,96 +6,179 @@
 <title>Dashboard Admin</title>
 <link rel="stylesheet" href="css/style.css" />
 <style>
-body{overflow:auto}
-.wrap{max-width:640px;margin:24px auto;padding:0 16px}
-input,button{font-size:16px;padding:10px;border-radius:10px;border:1px solid #333;background:#161616;color:#fff}
-button{background:#2b6cff;border-color:#2b6cff;cursor:pointer}
-button.ghost{background:#1c1c20;border-color:#333}
-button.ghost.on{border-color:#2b6cff;color:#8ab4ff}
-.row{display:flex;gap:8px;margin:8px 0} .row input{flex:1}
-li{display:flex;gap:8px;align-items:center;padding:8px;border-bottom:1px solid #222}
-li .grow{flex:1} li.done .grow{opacity:.5;text-decoration:line-through}
-.tag{font-size:11px;padding:3px 9px;border:1px solid #333;border-radius:99px;color:#9a9aa5}
-.wrap{max-width:640px}
-a{color:#8ab4ff}
-#login-card,#setup-card{max-width:380px;margin:12vh auto 0;padding:28px;background:#141417;border:1px solid #26262b;border-radius:16px;text-align:center}
-#login-card h1,#setup-card h1{margin:0 0 4px} #login-card input,#setup-card input{width:100%;margin:8px 0}
-#login-card button,#setup-card button{width:100%;margin-top:8px}
-#login-err,#setup-err{color:#ff9a9a;min-height:20px;font-size:14px}
-#login-card,#panel{display:none}
-#setup-card{display:none}
-.top{display:flex;justify-content:space-between;align-items:center}
+  body{overflow:auto;background:radial-gradient(1000px 500px at 50% -10%,#15151d 0%,#0b0b0e 60%)}
+  .shell{max-width:1080px;margin:0 auto;padding:20px 18px 80px}
+  /* header */
+  .appbar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:12px;
+    padding:14px 18px;margin:0 -18px 20px;background:rgba(13,13,17,.92);backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--line)}
+  .appbar .brand{font-size:19px;font-weight:800;flex:1}
+  .appbar .brand small{display:block;font-size:12px;font-weight:400;color:var(--dim)}
+  .btn-link{color:#8ab4ff;text-decoration:none;font-size:14px;padding:9px 12px;border-radius:10px}
+  .btn-link:hover{background:#1b1b22}
+  /* grid of cards */
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media (max-width:860px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:20px;
+    box-shadow:0 8px 28px rgba(0,0,0,.35)}
+  .card > h2{margin:0 0 4px;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.14em;color:var(--dim)}
+  .card .hint{margin:0 0 12px;font-size:13px;color:var(--dim)}
+  .card .icon{font-size:22px;margin-bottom:6px}
+  /* inputs + buttons */
+  input,button{font-size:15px;padding:11px 13px;border-radius:12px;border:1px solid #333;background:#101014;color:#fff}
+  input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(43,108,255,.25)}
+  input[type="checkbox"]{width:20px;height:20px;accent-color:var(--good);padding:0;flex:none;cursor:pointer}
+  button{background:var(--accent);border-color:var(--accent);cursor:pointer;font-weight:600;transition:filter .15s,transform .05s}
+  button:hover{filter:brightness(1.12)} button:active{transform:scale(.98)}
+  button:disabled{opacity:.6;cursor:wait}
+  button.ghost{background:#1c1c22;border-color:#333;font-weight:500}
+  button.ghost.on{border-color:var(--accent);color:#8ab4ff;background:rgba(43,108,255,.12)}
+  button.danger{background:transparent;border-color:rgba(255,93,93,.5);color:#ff9a9a;padding:8px 11px}
+  .row{display:flex;gap:8px;margin:10px 0} .row input{flex:1;min-width:0} .row button{white-space:nowrap}
+  /* segmented type picker */
+  .seg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
+  /* lists */
+  ul.items{list-style:none;margin:6px 0 0;padding:0}
+  ul.items li{display:flex;gap:10px;align-items:center;padding:11px 10px;border:1px solid transparent;border-radius:12px}
+  ul.items li:nth-child(odd){background:#101015}
+  ul.items li:hover{border-color:var(--line)}
+  ul.items .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+  ul.items li.done .grow{opacity:.5;text-decoration:line-through}
+  ul.items .sub2{display:block;font-size:12px;color:var(--dim);text-decoration:none}
+  .tag{flex:none;font-size:11px;padding:4px 10px;border:1px solid #333;border-radius:99px;color:#9a9aa5}
+  .empty{padding:14px;text-align:center;color:var(--dim);font-size:14px}
+  /* auth cards */
+  #login-card,#setup-card{max-width:400px;margin:12vh auto 0;padding:32px;background:var(--card);
+    border:1px solid var(--line);border-radius:20px;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.5)}
+  #login-card h1,#setup-card h1{margin:0 0 4px;font-size:24px}
+  #login-card input,#setup-card input{width:100%;margin:8px 0}
+  #login-card button,#setup-card button{width:100%;margin-top:10px}
+  #login-err,#setup-err{color:#ff9a9a;min-height:20px;font-size:14px}
+  #login-card,#panel{display:none}
+  #setup-card{display:none}
+  /* toast */
+  #msg{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(20px);opacity:0;pointer-events:none;
+    background:#1d2b1d;border:1px solid rgba(53,208,127,.5);color:#bdf0d2;padding:12px 20px;border-radius:14px;
+    font-size:14px;transition:opacity .25s,transform .25s;z-index:50;max-width:90vw}
+  #msg.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .now-line{font-size:15px;background:#101014;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:10px 0}
+  .now-line b{font-variant-numeric:tabular-nums}
+  details.howto{margin-top:10px;font-size:13px;color:var(--dim)}
+  details.howto summary{cursor:pointer;color:#8ab4ff}
+  details.howto ol{margin:8px 0;padding-left:20px}
+  .ok-dot{color:var(--good)} .bad-dot{color:var(--bad)}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <!-- First boot: create the admin account (only shown when no user exists) -->
-  <div id="setup-card">
-    <h1>👋 Welcome</h1>
-    <p class="sub dim">Create your admin account to control the dashboard</p>
+
+<!-- First boot: create the admin account -->
+<div class="shell" id="setup-shell" style="display:none">
+  <div id="setup-card" style="display:block">
+    <div class="icon">👋</div>
+    <h1>Welcome</h1>
+    <p class="hint">Create your admin account to control the dashboard</p>
     <input id="setup-user" placeholder="Choose a username" autocomplete="username" />
     <input id="setup-pass" type="password" placeholder="Choose a password (min 6 chars)" autocomplete="new-password" />
     <input id="setup-pass2" type="password" placeholder="Repeat password" autocomplete="new-password" />
     <button id="setup-btn">Create account</button>
     <p id="setup-err"></p>
-    <p><a href="/">← back to display</a></p>
+    <p><a class="btn-link" href="/">← back to display</a></p>
   </div>
+</div>
 
-  <!-- Custom login (no browser popup) -->
-  <div id="login-card">
-    <h1>🔒 Admin</h1>
-    <p class="sub dim">Sign in to control the dashboard</p>
+<!-- Login -->
+<div class="shell" id="login-shell" style="display:none">
+  <div id="login-card" style="display:block">
+    <div class="icon">🔒</div>
+    <h1>Admin</h1>
+    <p class="hint">Sign in to control the dashboard</p>
     <input id="login-user" placeholder="Username" autocomplete="username" />
     <input id="login-pass" type="password" placeholder="Password" autocomplete="current-password" />
     <button id="login-btn">Sign in</button>
     <p id="login-err"></p>
-    <p><a href="/">← back to display</a></p>
-  </div>
-
-  <!-- Control panel (hidden until logged in) -->
-  <div id="panel">
-    <div class="top">
-      <p><a href="/">← back to display</a></p>
-      <button id="logout-btn" class="ghost">Log out</button>
-    </div>
-    <h1>Admin</h1>
-
-    <h2>Add to-do</h2>
-    <div class="row"><input id="todo-text" placeholder="New task…" /><button id="todo-add">Add</button></div>
-    <ul id="list"></ul>
-
-    <h2>New timer</h2>
-    <div class="row"><input id="tm-name" placeholder="Timer name (e.g. Exams, Gym)…" /></div>
-    <div class="row">
-      <button id="type-long" class="ghost on">📅 Long (days)</button>
-      <button id="type-short" class="ghost">⏱ Short (today)</button>
-    </div>
-    <div id="long-inputs">
-      <div class="row"><input id="tm-days" type="number" value="12" min="1" placeholder="days from now" /><button id="tm-long-set">Set</button></div>
-      <div class="row"><input id="tm-date" type="date" /><button id="tm-date-set">Set date</button></div>
-      <p class="sub dim">Enter days from now <b>or</b> pick a target date — it calculates days left from today.</p>
-    </div>
-    <div id="short-inputs" style="display:none">
-      <div class="row">
-        <input id="tm-h" type="number" value="0" min="0" max="12" placeholder="hours" />
-        <input id="tm-m" type="number" value="25" min="0" max="600" placeholder="mins" />
-        <button id="tm-short-start">Start</button>
-      </div>
-      <div class="row"><input id="tm-at" type="time" /><button id="tm-at-start">At time</button></div>
-      <p class="sub dim">Countdown <b>or</b> a clock time today (e.g. 18:30) — it counts down to it.</p>
-    </div>
-
-    <h2>All timers</h2>
-    <ul id="timer-list"></ul>
-
-    <h2>Dashboard time</h2>
-    <p class="sub dim">Now showing: <b id="dash-now">—</b></p>
-    <div class="row"><input id="tm-datetime" type="datetime-local" /><button id="time-set">Set time</button></div>
-    <div class="row"><button id="time-reset" class="ghost">Reset to real time</button></div>
-    <p class="sub dim">Only changes the clock on the display. Timers keep counting real time.</p>
-    <p id="msg" class="sub"></p>
+    <p><a class="btn-link" href="/">← back to display</a></p>
   </div>
 </div>
+
+<!-- Control panel -->
+<div id="panel">
+  <div class="appbar">
+    <div class="brand">🎛 Control<small>tablet dashboard</small></div>
+    <a class="btn-link" href="/">📺 Display</a>
+    <button id="logout-btn" class="ghost">Log out</button>
+  </div>
+  <div class="shell">
+    <div class="grid">
+
+      <section class="card">
+        <div class="icon">✅</div>
+        <h2>To-Do</h2>
+        <p class="hint">Shows top 5 unchecked on the tablet</p>
+        <div class="row"><input id="todo-text" placeholder="New task…" /><button id="todo-add">Add</button></div>
+        <ul class="items" id="list"></ul>
+      </section>
+
+      <section class="card">
+        <div class="icon">⏱</div>
+        <h2>New timer</h2>
+        <p class="hint">Every timer has a name — long counts days, short counts today</p>
+        <div class="row"><input id="tm-name" placeholder="Timer name (e.g. Exams, Gym)…" /></div>
+        <div class="seg">
+          <button id="type-long" class="ghost on">📅 Long · days</button>
+          <button id="type-short" class="ghost">⏱ Short · today</button>
+        </div>
+        <div id="long-inputs">
+          <div class="row"><input id="tm-days" type="number" value="12" min="1" placeholder="days from now" /><button id="tm-long-set">Set</button></div>
+          <div class="row"><input id="tm-date" type="date" /><button id="tm-date-set">Set date</button></div>
+        </div>
+        <div id="short-inputs" style="display:none">
+          <div class="row">
+            <input id="tm-h" type="number" value="0" min="0" max="12" placeholder="hours" />
+            <input id="tm-m" type="number" value="25" min="0" max="600" placeholder="mins" />
+            <button id="tm-short-start">Start</button>
+          </div>
+          <div class="row"><input id="tm-at" type="time" /><button id="tm-at-start">At time</button></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="icon">🗂</div>
+        <h2>All timers</h2>
+        <p class="hint">Tick the box to mark done · ✕ deletes</p>
+        <ul class="items" id="timer-list"></ul>
+      </section>
+
+      <section class="card">
+        <div class="icon">🕐</div>
+        <h2>Dashboard time</h2>
+        <p class="hint">Shifts only the kiosk clock — timers keep real time</p>
+        <div class="now-line">Now showing: <b id="dash-now">—</b></div>
+        <div class="row"><input id="tm-datetime" type="datetime-local" /><button id="time-set">Set</button></div>
+        <div class="row"><button id="time-reset" class="ghost">Reset to real time</button></div>
+      </section>
+
+      <section class="card" style="grid-column:1/-1">
+        <div class="icon">📅</div>
+        <h2>Google Calendar</h2>
+        <p class="hint">Tablet shows your next event · <span id="cal-status"><span class="bad-dot">●</span> not connected</span></p>
+        <div class="row"><input id="cal-ics" placeholder="Paste private ICS / iCal URL…" /><button id="cal-save">Connect</button></div>
+        <div class="row"><button id="cal-clear" class="ghost">Disconnect</button></div>
+        <div class="now-line" id="cal-next" style="display:none"></div>
+        <details class="howto">
+          <summary>How to get the private ICS URL</summary>
+          <ol>
+            <li>Open <b>Google Calendar</b> on a PC → ⚙ Settings → your calendar → <b>Integrate calendar</b></li>
+            <li>Copy the <b>Secret address in iCal format</b> (ends with <b>.ics</b>)</li>
+            <li>Paste it above → Connect. Never share that link — anyone with it can read your calendar.</li>
+          </ol>
+        </details>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<div id="msg"></div>
 <script src="js/admin.js"></script>
 </body>
 </html>

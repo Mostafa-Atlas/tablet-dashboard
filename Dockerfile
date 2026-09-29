@@ -3,6 +3,7 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install --omit=dev
 COPY server.js ./
+COPY lib ./lib
 COPY public ./public
 ENV PORT=1200 DATA_DIR=/data
 VOLUME ["/data"]

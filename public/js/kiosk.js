@@ -174,22 +174,62 @@ function renderTime(t) {
   tickClock();
 }
 
+/* ---------- Next calendar event ---------- */
+let lastCal = null;
+function renderEvent(cal) {
+  lastCal = cal || null;
+  const el = $('event');
+  if (!cal || !cal.configured) { el.innerHTML = '<span class="dim">Connect calendar in /admin</span>'; return; }
+  const n = cal.next;
+  if (!n) {
+    el.innerHTML = cal.error
+      ? '<span class="dim">Calendar error — retrying…</span>'
+      : 'No upcoming events';
+    return;
+  }
+  // wall-clock display follows the dashboard offset; countdowns stay real-time
+  const d = new Date(n.startMs + clockOffsetSec * 1000);
+  let h = d.getHours(), m = String(d.getMinutes()).padStart(2, '0');
+  const ap = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  const today = dashboardNow();
+  const sameDay = d.getDate() === today.getDate() && d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
+  const when = sameDay ? `${h}:${m} ${ap}` : `${h}:${m} ${ap} · ${d.getDate()}-${d.getMonth() + 1}`;
+  el.innerHTML = '';
+  const title = document.createElement('div');
+  title.className = 'event-title' + (n.ongoing ? ' live' : '');
+  title.textContent = (n.ongoing ? '● ' : '') + n.summary;
+  const sub = document.createElement('div');
+  sub.className = 'event-sub';
+  sub.textContent = `${relTime(n.startMs, n.ongoing)} · ${when}` + (n.location ? ` · ${n.location}` : '');
+  el.append(title, sub);
+}
+function relTime(startMs, ongoing) {
+  if (ongoing) return 'now';
+  const s = Math.max(0, Math.round((startMs - Date.now()) / 1000));
+  if (s < 3600) return `in ${Math.max(1, Math.round(s / 60))}m`;
+  if (s < 86400) { const h = Math.floor(s / 3600), m = Math.round(s % 3600 / 60); return m ? `in ${h}h ${m}m` : `in ${h}h`; }
+  return `in ${Math.round(s / 86400)}d`;
+}
+
 async function boot() {
   try {
     const j = await (await fetch('/api/snapshot')).json();
-    renderPC(j.pc); renderTodos(j.todos); renderTimers(j.timers); renderWeather(j.weather); renderTime(j.time);
+    renderPC(j.pc); renderTodos(j.todos); renderTimers(j.timers); renderWeather(j.weather); renderTime(j.time); renderEvent(j.calendar);
   } catch {}
   const es = new EventSource('/api/stream');
   es.addEventListener('snapshot', e => {
-    try { const j = JSON.parse(e.data); renderPC(j.pc); renderTodos(j.todos); renderTimers(j.timers); renderWeather(j.weather); renderTime(j.time); } catch {}
+    try { const j = JSON.parse(e.data); renderPC(j.pc); renderTodos(j.todos); renderTimers(j.timers); renderWeather(j.weather); renderTime(j.time); renderEvent(j.calendar); } catch {}
   });
   es.addEventListener('pc', e => { try { renderPC(JSON.parse(e.data)); } catch {} });
   es.addEventListener('todos', e => { try { renderTodos(JSON.parse(e.data)); } catch {} });
   es.addEventListener('timers', e => { try { renderTimers(JSON.parse(e.data)); } catch {} });
   es.addEventListener('weather', e => { try { renderWeather(JSON.parse(e.data)); } catch {} });
   es.addEventListener('time', e => { try { renderTime(JSON.parse(e.data)); } catch {} });
+  es.addEventListener('calendar', e => { try { renderEvent(JSON.parse(e.data)); } catch {} });
   setInterval(async () => {
     try { renderWeather(await (await fetch('/api/weather')).json()); } catch {}
   }, 60000);
+  setInterval(() => { if (lastCal) renderEvent(lastCal); }, 30000); // refresh "in Xm" countdowns
 }
 boot();
