@@ -17,10 +17,11 @@
   .btn-link{color:#8ab4ff;text-decoration:none;font-size:14px;padding:9px 12px;border-radius:10px}
   .btn-link:hover{background:#1b1b22}
   /* grid of cards */
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-  @media (max-width:860px){.grid{grid-template-columns:1fr}}
+  .grid{display:flex;align-items:flex-start;gap:16px}
+  .admin-column{display:flex;flex:1;min-width:0;flex-direction:column;gap:16px}
+  @media (max-width:860px){.grid{flex-direction:column}.grid>.card{width:100%}}
   .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:20px;
-    box-shadow:0 8px 28px rgba(0,0,0,.35)}
+    box-shadow:0 8px 28px rgba(0,0,0,.35);width:100%}
   .card > h2{margin:0 0 6px;font-size:17px;font-weight:700;letter-spacing:.02em;color:var(--txt)}
   .card .hint{margin:0 0 12px;font-size:13px;color:var(--dim)}
   /* inputs + buttons */
@@ -122,7 +123,7 @@
   <div class="shell">
     <div class="grid">
 
-      <section class="card">
+      <section class="card" data-column="left">
         <h2>To-Do</h2>
         <p class="hint">Due tasks join the Today timeline. Set a priority and optional reminder time.</p>
         <div class="row"><div class="field"><label for="todo-text">New task</label><input id="todo-text" placeholder="What needs doing?" /></div>
@@ -135,14 +136,14 @@
         <ul class="items" id="list"></ul>
       </section>
 
-      <section class="card">
+      <section class="card" data-column="right">
         <h2>Pinned note</h2>
         <p class="hint">Save a short note from this page on your phone or PC. It appears on the tablet right away.</p>
         <label for="note-text">Note</label><textarea id="note-text" maxlength="1000" rows="5" placeholder="A reminder, shopping list, or message"></textarea>
         <div class="row"><button id="note-save">Save note</button><button id="note-clear" class="ghost">Clear</button></div>
       </section>
 
-      <section class="card">
+      <section class="card" data-column="right">
         <h2>Routine checklists</h2>
         <p class="hint">Check off steps here. Daily and weekly routines reset automatically.</p>
         <div class="row"><div class="field"><label for="routine-name">New routine</label><input id="routine-name" placeholder="Morning routine" /></div>
@@ -151,7 +152,7 @@
         <div id="routine-list"></div>
       </section>
 
-      <section class="card">
+      <section class="card" data-column="left">
         <h2>New timer</h2>
         <p class="hint">Every timer has a name — long counts days, short counts today</p>
         <div class="row"><div class="field"><label for="tm-name">Timer name</label><input id="tm-name" placeholder="E.g. Exams or Gym" /></div>
@@ -176,20 +177,20 @@
         </div>
       </section>
 
-      <section class="card">
+      <section class="card" data-column="left">
         <h2>All timers</h2>
         <p class="hint">Pause, resume, rename, recolor, or mark a timer done.</p>
         <ul class="items" id="timer-list"></ul>
       </section>
 
-      <section class="card">
+      <section class="card" data-column="right">
         <h2>Alarm sound</h2>
         <p class="hint">The tablet tries to play alarms automatically when a timer finishes or a task reaches its due time. If its browser blocks sound, Enable sound appears inside that alarm.</p>
         <p class="hint">For your own sound, place an MP3 named <code>alarm.mp3</code> in <code>public/audio/</code>. The built-in chime plays until that file exists.</p>
         <div class="row"><button id="alarm-test">Test sound on this device</button></div>
       </section>
 
-      <section class="card">
+      <section class="card" data-column="right">
         <h2>Dashboard time</h2>
         <p class="hint">Shifts only the kiosk clock — timers keep real time</p>
         <div class="now-line">Now showing: <b id="dash-now">—</b></div>
@@ -197,7 +198,7 @@
         <div class="row"><button id="time-reset" class="ghost">Reset to real time</button></div>
       </section>
 
-      <section class="card" style="grid-column:1/-1">
+      <section class="card" data-column="right">
         <h2>Google Calendar</h2>
         <p class="hint">Tablet shows your next event · <span id="cal-status"><span class="bad-dot">●</span> not connected</span></p>
         <div class="row"><div class="field"><label for="cal-ics">Private ICS / iCal URL</label><input id="cal-ics" type="url" placeholder="https://…" /></div><button id="cal-save">Connect</button></div>
@@ -213,7 +214,7 @@
         </details>
       </section>
 
-      <section class="card">
+      <section class="card" data-column="right">
         <h2>Tablet display</h2>
         <p class="hint">Preview changes on the tablet as soon as you save.</p>
         <div class="row"><div class="field"><label for="display-mode">Layout</label><select id="display-mode"><option value="overview">Overview</option><option value="focus">Focus on today and timers</option></select></div>
@@ -229,7 +230,7 @@
         <button id="display-save">Save display settings</button>
       </section>
 
-      <section class="card">
+      <section class="card" data-column="right">
         <h2>Data and agent</h2>
         <p class="hint">Export includes tasks, timers, note, routines, and display settings. Import replaces those items and keeps your account and calendar connection.</p>
         <div class="row"><button id="export-btn">Export JSON</button><button id="import-btn" class="ghost">Import JSON</button><input id="import-file" type="file" accept="application/json,.json" class="visually-hidden" aria-label="Choose dashboard export to import" /></div>

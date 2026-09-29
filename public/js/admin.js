@@ -11,6 +11,22 @@ const loginErr = t => document.getElementById('login-err').textContent = t || ''
 const setupErr = t => document.getElementById('setup-err').textContent = t || '';
 const getToken = () => localStorage.getItem('admin_token');
 const byId = id => document.getElementById(id);
+// Keep the mobile reading order, and give desktop cards independent vertical stacks.
+const adminGrid = document.querySelector('#panel .grid');
+const adminCards = [...adminGrid.querySelectorAll(':scope > .card')];
+const adminColumns = ['left', 'right'].map(() => {
+  const column = document.createElement('div'); column.className = 'admin-column'; return column;
+});
+const adminDesktop = window.matchMedia('(min-width: 861px)');
+function arrangeAdminCards() {
+  if (adminDesktop.matches) {
+    adminGrid.replaceChildren(...adminColumns);
+    adminCards.forEach(card => adminColumns[card.dataset.column === 'left' ? 0 : 1].appendChild(card));
+  } else adminGrid.replaceChildren(...adminCards);
+}
+if (adminDesktop.addEventListener) adminDesktop.addEventListener('change', arrangeAdminCards);
+else adminDesktop.addListener(arrangeAdminCards);
+arrangeAdminCards();
 function actionButton(text, label, onClick, className = 'ghost') {
   const button = document.createElement('button');
   button.type = 'button'; button.textContent = text; button.className = className;
