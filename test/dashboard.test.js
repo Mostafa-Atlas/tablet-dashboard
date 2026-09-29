@@ -81,6 +81,22 @@ test('dashboard data, agent access, privacy, and backup recovery', async () => {
     await request(`/api/todos/${task.id}`, 'PATCH', { action: 'up' }, token);
     const ordered = (await request('/api/todos')).data;
     assert.ok(ordered.findIndex(t => t.id === task.id) < ordered.findIndex(t => t.id === second.id));
+    const due = Date.now() + 120000;
+    const planned = (await request('/api/todos', 'POST', { text: 'Due soon', dueAt: due, priority: 'high' }, token)).data;
+    assert.equal((await request('/api/todos')).data.find(t => t.id === planned.id).dueAt, due);
+    assert.equal((await request(`/api/todos/${planned.id}`, 'PATCH', { priority: 'low', dueAt: null }, token)).data.priority, 'low');
+    assert.equal((await request('/api/todos')).data.find(t => t.id === planned.id).dueAt, null);
+    const repeating = (await request('/api/todos', 'POST', { text: 'Weekly reminder', repeat: 'weekly', dueTime: '18:30', dueWeekday: 2 }, token)).data;
+    assert.ok(Number.isFinite((await request('/api/todos')).data.find(t => t.id === repeating.id).dueAt));
+    assert.equal((await request('/api/todos', 'POST', { text: 'Bad time', repeat: 'daily', dueTime: '28:99' }, token)).status, 400);
+
+    assert.equal((await request('/api/note', 'POST', { text: 'Buy milk' })).status, 401);
+    assert.equal((await request('/api/note', 'POST', { text: 'Buy milk' }, token)).status, 200);
+    assert.equal((await request('/api/snapshot')).data.note.text, 'Buy milk');
+    const routine = (await request('/api/routines', 'POST', { name: 'Morning', repeat: 'daily' }, token)).data;
+    const step = (await request(`/api/routines/${routine.id}/items`, 'POST', { text: 'Drink water' }, token)).data;
+    assert.equal((await request(`/api/routines/${routine.id}/items/${step.id}`, 'PATCH', { done: true }, token)).status, 200);
+    assert.equal((await request('/api/snapshot')).data.routines[0].items[0].done, true);
 
     const timer = (await request('/api/timers', 'POST', {
       name: 'Focus', type: 'short', hours: 0, mins: 25
@@ -100,11 +116,19 @@ test('dashboard data, agent access, privacy, and backup recovery', async () => {
     assert.equal((await request('/api/snapshot')).data.calendar.next.location, '');
 
     const exported = await request('/api/export', 'GET', null, token);
-    assert.equal(exported.data.format, 'tablet-dashboard-v1');
+    assert.equal(exported.data.format, 'tablet-dashboard-v2');
+    assert.equal(exported.data.note.text, 'Buy milk');
+    assert.equal(exported.data.routines[0].items[0].text, 'Drink water');
     assert.ok(!JSON.stringify(exported.data).includes(calendarUrl));
     await request(`/api/todos/${task.id}`, 'DELETE', null, token);
     assert.equal((await request('/api/import', 'POST', exported.data, token)).status, 200);
     assert.ok((await request('/api/todos')).data.some(t => t.text === 'Daily task'));
+    assert.equal((await request('/api/snapshot')).data.note.text, 'Buy milk');
+    assert.equal((await request('/api/snapshot')).data.routines[0].items[0].done, true);
+    const oldExport = { ...exported.data, format: 'tablet-dashboard-v1' };
+    delete oldExport.note; delete oldExport.routines;
+    assert.equal((await request('/api/import', 'POST', oldExport, token)).status, 200);
+    assert.equal((await request('/api/snapshot')).data.note.text, 'Buy milk');
 
     await stopDashboard(dashboard.child);
     fs.writeFileSync(path.join(dataDir, 'db.json'), '{broken');

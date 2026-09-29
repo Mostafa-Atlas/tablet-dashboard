@@ -105,10 +105,9 @@ async function refresh() {
       refresh();
     };
     const sp = document.createElement('span'); sp.textContent = t.text; sp.className = 'grow';
-    if (t.repeat && t.repeat !== 'none') {
-      const repeat = document.createElement('small'); repeat.className = 'sub2'; repeat.textContent = `Repeats ${t.repeat}`;
-      sp.appendChild(repeat);
-    }
+    const detail = document.createElement('small'); detail.className = 'sub2';
+    detail.textContent = `${(t.priority || 'normal').toUpperCase()} priority${t.dueAt ? ' · ' + new Date(t.dueAt).toLocaleString() : ''}${t.repeat && t.repeat !== 'none' ? ' · repeats ' + t.repeat : ''}`;
+    sp.appendChild(detail);
     const actions = document.createElement('div'); actions.className = 'item-actions';
     const move = async direction => {
       const result = await authFetch('/api/todos/' + t.id, { method: 'PATCH', body: JSON.stringify({ action: direction }) });
@@ -138,17 +137,39 @@ async function refresh() {
     }
     repeatSelect.value = t.repeat || 'none';
     repeatSelect.onchange = async () => {
-      const result = await authFetch('/api/todos/' + t.id, { method: 'PATCH', body: JSON.stringify({ repeat: repeatSelect.value }) });
+      const result = await authFetch('/api/todos/' + t.id, { method: 'PATCH', body: JSON.stringify({ repeat: repeatSelect.value, dueAt: null, dueTime: null }) });
       if (!result.ok) msg('Could not change repeat');
       refresh();
     };
+    const schedule = actionButton('Schedule', `Edit priority and due time for ${t.text}`, () => {
+      const editor = document.createElement('div'); editor.className = 'row'; editor.style.width = '100%';
+      const priority = document.createElement('select'); priority.setAttribute('aria-label', 'Priority');
+      for (const value of ['normal', 'high', 'low']) priority.add(new Option(value[0].toUpperCase() + value.slice(1), value));
+      priority.value = t.priority || 'normal';
+      const due = document.createElement('input'); due.type = t.repeat === 'none' || !t.repeat ? 'datetime-local' : 'time';
+      due.setAttribute('aria-label', t.repeat === 'none' || !t.repeat ? 'Due date and time' : 'Due time');
+      due.value = t.repeat === 'none' || !t.repeat ? (t.dueAt ? localInputValue(t.dueAt) : '') : (t.dueTime || '');
+      const weekday = document.createElement('select'); weekday.setAttribute('aria-label', 'Day of week');
+      ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].forEach((day, i) => weekday.add(new Option(day, i)));
+      weekday.value = String(t.dueWeekday || 0);
+      weekday.hidden = t.repeat !== 'weekly';
+      const save = actionButton('Save', `Save schedule for ${t.text}`, async () => {
+        const body = { priority: priority.value, dueWeekday: Number(weekday.value),
+          ...(t.repeat === 'none' || !t.repeat ? { dueAt: due.value ? new Date(due.value).getTime() : null } : { dueTime: due.value || null }) };
+        const result = await authFetch('/api/todos/' + t.id, { method: 'PATCH', body: JSON.stringify(body) });
+        if (!result.ok) msg((await result.json()).error || 'Could not save schedule');
+        refresh();
+      });
+      editor.append(priority, due, weekday, save, actionButton('Cancel', 'Cancel schedule', refresh));
+      actions.hidden = true; li.appendChild(editor);
+    });
     const del = actionButton('Delete', `Delete ${t.text}`, async () => {
       if (!confirm(`Delete task "${t.text}"?`)) return;
       const result = await authFetch('/api/todos/' + t.id, { method: 'DELETE' });
       if (!result.ok) msg('Could not delete task');
       refresh();
     }, 'danger');
-    actions.append(up, down, edit, repeatSelect, del);
+    actions.append(up, down, edit, schedule, repeatSelect, del);
     li.append(cb, sp, actions); ul.appendChild(li);
   });
   refreshTimers();
@@ -156,6 +177,8 @@ async function refresh() {
   refreshCal();
   refreshDisplay();
   refreshAgentToken();
+  refreshNote();
+  refreshRoutines();
 }
 
 async function refreshTimers() {
@@ -263,11 +286,116 @@ document.getElementById('logout-btn').onclick = async () => {
 document.getElementById('todo-add').onclick = async () => {
   const el = document.getElementById('todo-text');
   if (!el.value.trim()) return;
-  const r = await authFetch('/api/todos', { method: 'POST', body: JSON.stringify({ text: el.value, repeat: byId('todo-repeat').value }) });
-  if (!r.ok) { msg('Failed — are you logged in?'); return; }
+  const repeat = byId('todo-repeat').value;
+  const body = { text: el.value, repeat, priority: byId('todo-priority').value,
+    dueAt: repeat === 'none' && byId('todo-due-date').value ? new Date(byId('todo-due-date').value).getTime() : null,
+    dueTime: repeat === 'none' ? null : (byId('todo-due-time').value || null),
+    dueWeekday: Number(byId('todo-weekday').value) };
+  const r = await authFetch('/api/todos', { method: 'POST', body: JSON.stringify(body) });
+  if (!r.ok) { msg((await r.json()).error || 'Could not add task'); return; }
   el.value = ''; msg('Added ✓'); refresh();
 };
 byId('todo-text').addEventListener('keydown', e => { if (e.key === 'Enter') byId('todo-add').click(); });
+function showTodoDueFields() {
+  const repeat = byId('todo-repeat').value;
+  byId('todo-date-wrap').hidden = repeat !== 'none';
+  byId('todo-time-wrap').hidden = repeat === 'none';
+  byId('todo-weekday-wrap').hidden = repeat !== 'weekly';
+}
+byId('todo-repeat').onchange = showTodoDueFields;
+showTodoDueFields();
+
+async function refreshNote() {
+  try {
+    const r = await fetch('/api/note');
+    if (r.ok) byId('note-text').value = (await r.json()).text || '';
+  } catch { msg('Could not load note'); }
+}
+byId('note-save').onclick = async () => {
+  const r = await authFetch('/api/note', { method: 'POST', body: JSON.stringify({ text: byId('note-text').value }) });
+  msg(r.ok ? 'Note saved' : 'Could not save note');
+};
+byId('note-clear').onclick = async () => {
+  byId('note-text').value = '';
+  byId('note-save').click();
+};
+
+async function refreshRoutines() {
+  const r = await authFetch('/api/routines');
+  if (!r.ok) return;
+  const routines = await r.json();
+  const box = byId('routine-list'); box.replaceChildren();
+  if (!routines.length) { const empty = document.createElement('p'); empty.className = 'hint'; empty.textContent = 'No routines yet'; box.appendChild(empty); }
+  routines.forEach(routine => {
+    const section = document.createElement('div'); section.className = 'routine-editor';
+    const title = document.createElement('strong');
+    title.textContent = `${routine.name} · ${routine.items.filter(i => i.done).length}/${routine.items.length} · ${routine.repeat}`;
+    const rename = actionButton('Rename', `Rename ${routine.name}`, async () => {
+      const name = prompt('Routine name', routine.name);
+      if (!name?.trim()) return;
+      const result = await authFetch(`/api/routines/${routine.id}`, { method: 'PATCH', body: JSON.stringify({ name }) });
+      msg(result.ok ? 'Routine renamed' : 'Could not rename routine'); refreshRoutines();
+    });
+    const remove = actionButton('Delete', `Delete ${routine.name}`, async () => {
+      if (!confirm(`Delete routine "${routine.name}"?`)) return;
+      const result = await authFetch(`/api/routines/${routine.id}`, { method: 'DELETE' });
+      msg(result.ok ? 'Routine deleted' : 'Could not delete routine'); refreshRoutines();
+    }, 'danger');
+    const header = document.createElement('div'); header.className = 'row'; header.append(title, rename, remove); section.appendChild(header);
+    const list = document.createElement('ul'); list.className = 'items';
+    routine.items.forEach(item => {
+      const row = document.createElement('li');
+      const check = document.createElement('input'); check.type = 'checkbox'; check.checked = item.done;
+      check.setAttribute('aria-label', `Complete ${item.text}`);
+      check.onchange = async () => {
+        const result = await authFetch(`/api/routines/${routine.id}/items/${item.id}`, { method: 'PATCH', body: JSON.stringify({ done: check.checked }) });
+        if (!result.ok) msg('Could not update step'); refreshRoutines();
+      };
+      const text = document.createElement('span'); text.className = 'grow'; text.textContent = item.text;
+      const edit = actionButton('Edit', `Edit ${item.text}`, async () => {
+        const value = prompt('Step', item.text);
+        if (!value?.trim()) return;
+        const result = await authFetch(`/api/routines/${routine.id}/items/${item.id}`, { method: 'PATCH', body: JSON.stringify({ text: value }) });
+        msg(result.ok ? 'Step updated' : 'Could not update step'); refreshRoutines();
+      });
+      const del = actionButton('×', `Delete ${item.text}`, async () => {
+        const result = await authFetch(`/api/routines/${routine.id}/items/${item.id}`, { method: 'DELETE' });
+        if (!result.ok) msg('Could not delete step'); refreshRoutines();
+      }, 'danger');
+      row.append(check, text, edit, del); list.appendChild(row);
+    });
+    section.appendChild(list);
+    const entry = document.createElement('input'); entry.placeholder = 'Add a step'; entry.maxLength = 120;
+    entry.setAttribute('aria-label', `New step for ${routine.name}`);
+    const add = actionButton('Add step', `Add step to ${routine.name}`, async () => {
+      if (!entry.value.trim()) return;
+      const result = await authFetch(`/api/routines/${routine.id}/items`, { method: 'POST', body: JSON.stringify({ text: entry.value }) });
+      if (!result.ok) msg((await result.json()).error || 'Could not add step'); refreshRoutines();
+    });
+    entry.onkeydown = e => { if (e.key === 'Enter') add.click(); };
+    const foot = document.createElement('div'); foot.className = 'row'; foot.append(entry, add); section.appendChild(foot);
+    box.appendChild(section);
+  });
+}
+byId('routine-add').onclick = async () => {
+  const name = byId('routine-name').value.trim();
+  if (!name) return;
+  const r = await authFetch('/api/routines', { method: 'POST', body: JSON.stringify({ name, repeat: byId('routine-repeat').value }) });
+  if (!r.ok) return msg((await r.json()).error || 'Could not add routine');
+  byId('routine-name').value = ''; refreshRoutines();
+};
+byId('routine-name').onkeydown = e => { if (e.key === 'Enter') byId('routine-add').click(); };
+byId('alarm-test').onclick = async () => {
+  const audio = new Audio('/audio/alarm.mp3');
+  try { await audio.play(); setTimeout(() => { audio.pause(); audio.currentTime = 0; }, 2500); msg('Playing alarm'); }
+  catch {
+    const context = new AudioContext(); await context.resume();
+    const tone = context.createOscillator(); const gain = context.createGain();
+    tone.frequency.value = 880; gain.gain.value = 0.12; tone.connect(gain).connect(context.destination);
+    tone.start(); tone.stop(context.currentTime + 0.4); tone.onended = () => context.close();
+    msg('Playing built-in chime');
+  }
+};
 
 /* ---- dashboard clock override ---- */
 async function refreshTime() {

@@ -1,4 +1,4 @@
-// Kiosk: 12h clock, SSE live updates, stale handling. Display only (no interaction).
+// Kiosk: 12h clock, SSE live updates, stale handling, and local alarm controls.
 const $ = id => document.getElementById(id);
 
 // Dashboard clock = real time + server offset (set from /admin). 0 = real time.
@@ -82,18 +82,36 @@ function escapeHtml(s) {
 }
 
 /* ---------- To-do ---------- */
+let lastTodos = [];
 function renderTodos(list) {
+  lastTodos = list || [];
   const ul = $('todos'); ul.innerHTML = '';
-  const vis = (list || []).filter(t => !t.done).slice(0, 5);
+  const now = new Date();
+  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
+  const vis = lastTodos.filter(t => !t.done && (display.showCalendar === false || !t.dueAt || t.dueAt >= todayEnd)).sort((a, b) => {
+    const rank = { high: 0, normal: 1, low: 2 };
+    return (rank[a.priority] ?? 1) - (rank[b.priority] ?? 1) || (a.dueAt || Infinity) - (b.dueAt || Infinity);
+  }).slice(0, 5);
   const done = (list || []).filter(t => t.done).length;
-  if (!vis.length) ul.innerHTML = '<li class="empty-msg dim">You have nothing to do, sir</li>';
+  if (!vis.length) ul.innerHTML = '<li class="empty-msg dim">No other tasks</li>';
   vis.forEach(t => {
     const li = document.createElement('li');
     li.innerHTML = `<span class="chk"></span><span></span>`;
-    li.lastChild.textContent = t.text;
+    const label = li.lastChild;
+    label.textContent = t.text;
+    if (t.priority === 'high') li.classList.add('high-priority');
+    if (t.dueAt || (t.priority && t.priority !== 'normal')) {
+      const time = document.createElement('small'); time.className = 'todo-due';
+      const priority = t.priority && t.priority !== 'normal' ? t.priority[0].toUpperCase() + t.priority.slice(1) : '';
+      const due = t.dueAt ? (t.dueAt <= Date.now() ? 'Overdue' : relTime(t.dueAt, false)) : '';
+      time.textContent = [priority, due].filter(Boolean).join(' · ');
+      label.appendChild(time);
+    }
     ul.appendChild(li);
   });
   if (done) { const li = document.createElement('li'); li.className = 'dim'; li.textContent = `+ ${done} done`; ul.appendChild(li); }
+  if (lastCal) renderEvent(lastCal);
+  updateAlarms();
 }
 
 /* ---------- Timers (multiple, named) ---------- */
@@ -126,6 +144,7 @@ function renderTimers(t) {
     box.appendChild(card);
   });
   tickTimers();
+  updateAlarms();
 }
 function tickTimers() {
   if (!timers) return;
@@ -179,7 +198,7 @@ function fmt(sec) {
   const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
   return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s).padStart(2, '0');
 }
-setInterval(tickTimers, 1000);
+setInterval(() => { tickTimers(); updateAlarms(); }, 1000);
 
 function renderWeather(w) {
   if (!w || w.temp == null) { $('weather').textContent = '—'; return; }
@@ -199,21 +218,21 @@ function renderEvent(cal) {
   lastCal = cal || null;
   const el = $('event');
   el.innerHTML = '';
-  if (!cal || !cal.configured) {
-    el.innerHTML = '<span class="dim">Connect calendar in /admin</span>';
-    return;
-  }
   const now = Date.now();
   const dn = new Date();
   const dayStart = new Date(dn.getFullYear(), dn.getMonth(), dn.getDate()).getTime();
   const dayEnd = new Date(dn.getFullYear(), dn.getMonth(), dn.getDate() + 1).getTime();
-  const list = (cal.upcoming || [])
+  const list = (cal?.upcoming || [])
     .filter(e => e.startMs < dayEnd && e.endMs > dayStart)
     .sort((a, b) => a.startMs - b.startMs);
 
   // all-day chips first
   const allDay = list.filter(e => e.allDay);
-  const timed = list.filter(e => !e.allDay);
+  const timed = list.filter(e => !e.allDay).map(e => ({ ...e, kind: 'event' }));
+  const dueTasks = lastTodos.filter(t => !t.done && t.dueAt && t.dueAt < dayEnd)
+    .map(t => ({ kind: 'task', startMs: t.dueAt, endMs: t.dueAt, summary: t.text, priority: t.priority || 'normal' }));
+  timed.push(...dueTasks);
+  timed.sort((a, b) => a.startMs - b.startMs || (a.kind === 'task' ? -1 : 1));
   if (allDay.length) {
     const row = document.createElement('div');
     row.className = 'tl-allday';
@@ -226,23 +245,25 @@ function renderEvent(cal) {
     el.appendChild(row);
   }
   if (!timed.length && !allDay.length) {
-    el.innerHTML += cal.error
+    el.innerHTML += cal?.error
       ? '<span class="dim">Calendar error — retrying…</span>'
-      : '<span class="empty-msg dim">You have nothing to do, sir</span>';
+      : '<span class="empty-msg dim">No events or due tasks today</span>';
     return;
   }
   const rail = document.createElement('div');
   rail.className = 'tl';
   let firstFuture = null;
   timed.forEach(e => {
-    const past = e.endMs <= now, live = e.startMs <= now && now < e.endMs;
+    const task = e.kind === 'task';
+    const past = !task && e.endMs <= now, live = !task && e.startMs <= now && now < e.endMs;
+    const overdue = task && e.startMs <= now;
     const item = document.createElement('div');
-    item.className = 'tl-item' + (past ? ' past' : '') + (live ? ' live' : '');
+    item.className = 'tl-item' + (past ? ' past' : '') + (live ? ' live' : '') + (overdue ? ' overdue' : '') + (task ? ' task' : '');
     const s = new Date(e.startMs);
     const en = new Date(e.endMs);
     const t = document.createElement('div');
     t.className = 'tl-time';
-    t.textContent = fmtTime(s) + ' – ' + fmtTime(en);
+    t.textContent = task ? fmtTime(s) + ' · TASK' : fmtTime(s) + ' – ' + fmtTime(en);
     const body = document.createElement('div');
     body.className = 'tl-body';
     const title = document.createElement('div');
@@ -250,11 +271,13 @@ function renderEvent(cal) {
     title.textContent = e.summary;
     const meta = document.createElement('div');
     meta.className = 'tl-meta';
-    meta.textContent = (live ? 'now' : past ? 'done' : relTime(e.startMs, false)) + (e.location ? ' · ' + e.location : '');
+    meta.textContent = task
+      ? `${(e.priority || 'normal').toUpperCase()} priority · ${overdue ? 'Due now' : relTime(e.startMs, false)}`
+      : (live ? 'now' : past ? 'done' : relTime(e.startMs, false)) + (e.location ? ' · ' + e.location : '');
     body.append(title, meta);
     item.append(t, body);
     rail.appendChild(item);
-    if (!past && !live && !firstFuture) firstFuture = item;
+    if (e.startMs > now && !firstFuture) firstFuture = item;
   });
   // "now" marker between done/live and what's next
   if (firstFuture && firstFuture !== rail.firstChild) {
@@ -279,6 +302,102 @@ function relTime(startMs, ongoing) {
   return `in ${Math.round(s / 86400)}d`;
 }
 
+/* ---------- Note, routines, and reminders ---------- */
+function renderNote(note) {
+  const value = note?.text || '';
+  $('note-section').hidden = !value;
+  $('pinned-note').textContent = value;
+}
+function renderRoutines(routines) {
+  const box = $('routines'); box.replaceChildren();
+  $('routine-section').hidden = !routines?.length;
+  (routines || []).forEach(routine => {
+    const card = document.createElement('div'); card.className = 'routine-card';
+    const done = routine.items.filter(i => i.done).length;
+    const heading = document.createElement('div'); heading.className = 'routine-heading';
+    const name = document.createElement('strong'); name.textContent = routine.name;
+    const count = document.createElement('span'); count.textContent = `${done}/${routine.items.length}`;
+    heading.append(name, count); card.appendChild(heading);
+    const progress = document.createElement('div'); progress.className = 'bar small';
+    const fill = document.createElement('i'); fill.style.width = routine.items.length ? `${done / routine.items.length * 100}%` : '0%';
+    progress.appendChild(fill); card.appendChild(progress);
+    const list = document.createElement('ul'); list.className = 'routine-steps';
+    routine.items.forEach(item => {
+      const li = document.createElement('li'); if (item.done) li.className = 'done';
+      const check = document.createElement('span'); check.className = `chk${item.done ? ' on' : ''}`; check.textContent = item.done ? '✓' : '';
+      const label = document.createElement('span'); label.textContent = item.text;
+      li.append(check, label); list.appendChild(li);
+    });
+    card.appendChild(list); box.appendChild(card);
+  });
+}
+let soundEnabled = false, soundContext = null, customSound = false, fallbackLoop = null;
+let currentAlarm = null;
+const alarmMemory = (() => { try { return JSON.parse(localStorage.getItem('dashboard-alarms') || '{}'); } catch { return {}; } })();
+function saveAlarmMemory() { try { localStorage.setItem('dashboard-alarms', JSON.stringify(alarmMemory)); } catch {} }
+function chime() {
+  if (!soundContext || soundContext.state !== 'running') return;
+  const oscillator = soundContext.createOscillator(), gain = soundContext.createGain();
+  oscillator.type = 'sine'; oscillator.frequency.setValueAtTime(880, soundContext.currentTime);
+  oscillator.frequency.setValueAtTime(660, soundContext.currentTime + 0.2);
+  gain.gain.setValueAtTime(0.12, soundContext.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, soundContext.currentTime + 0.5);
+  oscillator.connect(gain).connect(soundContext.destination);
+  oscillator.start(); oscillator.stop(soundContext.currentTime + 0.5);
+}
+function stopAlarmSound() {
+  $('alarm-audio').pause(); $('alarm-audio').currentTime = 0;
+  if (fallbackLoop) clearInterval(fallbackLoop);
+  fallbackLoop = null;
+}
+async function startAlarmSound() {
+  if (!soundEnabled || !currentAlarm) return;
+  stopAlarmSound();
+  if (customSound) {
+    try { await $('alarm-audio').play(); return; } catch { customSound = false; }
+  }
+  chime(); fallbackLoop = setInterval(chime, 2500);
+}
+$('alarm-audio').onerror = () => { if (currentAlarm && soundEnabled && !fallbackLoop) { customSound = false; startAlarmSound(); } };
+$('sound-enable').onclick = async () => {
+  try {
+    soundContext ||= new (window.AudioContext || window.webkitAudioContext)();
+    await soundContext.resume();
+    soundEnabled = true;
+    customSound = (await fetch('/audio/alarm.mp3', { method: 'HEAD' })).ok;
+    $('sound-status').textContent = customSound ? 'Alarm sound enabled' : 'Built-in chime enabled';
+    $('sound-enable').hidden = true;
+    chime();
+    if (currentAlarm) startAlarmSound();
+  } catch { $('sound-status').textContent = 'Sound blocked. Tap Enable sound again or check tablet volume.'; }
+};
+function updateAlarms() {
+  const now = Date.now();
+  const candidates = [];
+  lastTodos.filter(t => !t.done && t.dueAt && now >= t.dueAt && now - t.dueAt < 86400000)
+    .forEach(t => candidates.push({ id: `task:${t.id}:${t.dueAt}`, name: t.text, detail: 'Task due', at: t.dueAt }));
+  timers.filter(t => !t.done && t.targetAt && now >= t.targetAt && now - t.targetAt < 86400000)
+    .forEach(t => candidates.push({ id: `timer:${t.id}:${t.targetAt}`, name: t.name, detail: 'Timer finished', at: t.targetAt }));
+  candidates.sort((a, b) => a.at - b.at);
+  const next = candidates.find(a => !alarmMemory[a.id]?.dismissed && (!alarmMemory[a.id]?.snoozedUntil || alarmMemory[a.id].snoozedUntil <= now));
+  if (next?.id === currentAlarm?.id) return;
+  stopAlarmSound(); currentAlarm = next || null;
+  $('alarm-banner').hidden = !next;
+  if (next) {
+    $('alarm-title').textContent = next.name;
+    $('alarm-detail').textContent = next.detail;
+    startAlarmSound();
+  }
+}
+$('alarm-dismiss').onclick = () => {
+  if (!currentAlarm) return;
+  alarmMemory[currentAlarm.id] = { dismissed: true }; saveAlarmMemory(); updateAlarms();
+};
+$('alarm-snooze').onclick = () => {
+  if (!currentAlarm) return;
+  alarmMemory[currentAlarm.id] = { snoozedUntil: Date.now() + 5 * 60000 }; saveAlarmMemory(); updateAlarms();
+};
+
 /* ---------- Kiosk display and connection state ---------- */
 let display = {};
 let streamConnected = false;
@@ -288,6 +407,7 @@ function quietNow(start, end) {
   return start <= end ? hhmm >= start && hhmm < end : hhmm >= start || hhmm < end;
 }
 function applyDisplay(prefs) {
+  const previousShowCalendar = display.showCalendar;
   display = prefs || display;
   document.body.classList.toggle('focus', display.mode === 'focus');
   document.body.classList.toggle('large-text', display.textSize === 'large');
@@ -297,6 +417,7 @@ function applyDisplay(prefs) {
   $('today-section').hidden = display.showCalendar === false;
   $('todo-section').hidden = display.showTodos === false;
   $('pc-state').hidden = display.showPC === false || display.mode === 'focus';
+  if (previousShowCalendar !== display.showCalendar && lastTodos.length) renderTodos(lastTodos);
 }
 function updateConnection() {
   const online = streamConnected && Date.now() - lastStreamAt < 45000;
@@ -308,6 +429,7 @@ function renderSnapshot(j) {
   serverClockOffsetMs = Number(j.now) ? Number(j.now) - Date.now() : serverClockOffsetMs;
   renderPC(j.pc); renderTodos(j.todos); renderTimers(j.timers); renderWeather(j.weather);
   renderTime(j.time); applyDisplay(j.display); renderEvent(j.calendar);
+  renderNote(j.note); renderRoutines(j.routines);
 }
 
 async function boot() {
@@ -329,6 +451,8 @@ async function boot() {
   es.addEventListener('time', e => { try { renderTime(JSON.parse(e.data)); } catch {} });
   es.addEventListener('calendar', e => { try { renderEvent(JSON.parse(e.data)); } catch {} });
   es.addEventListener('display', e => { try { applyDisplay(JSON.parse(e.data)); } catch {} });
+  es.addEventListener('note', e => { try { renderNote(JSON.parse(e.data)); } catch {} });
+  es.addEventListener('routines', e => { try { renderRoutines(JSON.parse(e.data)); } catch {} });
   setInterval(async () => {
     try { renderWeather(await (await fetch('/api/weather')).json()); } catch {}
   }, 60000);

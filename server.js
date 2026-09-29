@@ -49,7 +49,9 @@ function defaultDb() {
     calendar: { next: null, upcoming: [], updatedAt: 0, error: null, configured: false },
     users: [], // { user, salt, hash, createdAt } — created via first-boot setup page
     agentToken: crypto.randomBytes(32).toString('hex'),
-    display: { ...DEFAULT_DISPLAY }
+    display: { ...DEFAULT_DISPLAY },
+    note: { text: '', updatedAt: 0 },
+    routines: []
   };
 }
 
@@ -88,6 +90,8 @@ if (!db.calendar || typeof db.calendar !== 'object') { db.calendar = { next: nul
 if (!Array.isArray(db.calendar.upcoming)) { db.calendar.upcoming = []; saveDb(); }
 if (!db.agentToken) { db.agentToken = crypto.randomBytes(32).toString('hex'); saveDb(); }
 if (!db.display) { db.display = { ...DEFAULT_DISPLAY }; saveDb(); }
+if (!db.note || typeof db.note.text !== 'string') { db.note = { text: '', updatedAt: 0 }; saveDb(); }
+if (!Array.isArray(db.routines)) { db.routines = []; saveDb(); }
 // migrate old single long/short timer object -> named timers array
 if (db.timers && !Array.isArray(db.timers)) {
   const arr = [];
@@ -257,7 +261,8 @@ function publicCalendar() {
 function snapshot() {
   rolloverTodos();
   return { now: Date.now(), pc: db.pc, todos: todosForClient(), timers: sortTimers(db.timers),
-    weather: db.weather, time: db.time, calendar: publicCalendar(), display: db.display };
+    weather: db.weather, time: db.time, calendar: publicCalendar(), display: db.display,
+    note: db.note, routines: routinesForClient() };
 }
 app.get('/api/snapshot', (req, res) => res.json(snapshot()));
 
@@ -283,6 +288,7 @@ app.get('/api/pc', (req, res) => res.json(db.pc));
 
 // ---- Todos ----
 const cairoDate = new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' });
+const cairoClock = new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
 function dayKey(now = Date.now()) {
   const parts = Object.fromEntries(cairoDate.formatToParts(now).map(p => [p.type, p.value]));
   return `${parts.year}-${parts.month}-${parts.day}`;
@@ -292,6 +298,32 @@ function weekKey(now = Date.now()) {
   day.setUTCDate(day.getUTCDate() - (day.getUTCDay() + 6) % 7);
   return day.toISOString().slice(0, 10);
 }
+function cairoTimestamp(day, time) {
+  const [year, month, date] = day.split('-').map(Number);
+  const [hour, minute] = time.split(':').map(Number);
+  const wanted = Date.UTC(year, month - 1, date, hour, minute);
+  let guess = wanted - 2 * 3600000;
+  for (let i = 0; i < 2; i++) {
+    const p = Object.fromEntries(cairoClock.formatToParts(guess).map(x => [x.type, Number(x.value)]));
+    const shown = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+    guess += wanted - shown;
+  }
+  return guess;
+}
+function todoDueAt(t, now = Date.now()) {
+  if (t.repeat === 'none' || !t.repeat) return Number.isFinite(t.dueAt) ? t.dueAt : null;
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(t.dueTime || '')) return null;
+  if (t.repeat === 'daily') return cairoTimestamp(dayKey(now), t.dueTime);
+  const monday = new Date(weekKey(now) + 'T00:00:00Z');
+  monday.setUTCDate(monday.getUTCDate() + (Number.isInteger(t.dueWeekday) ? t.dueWeekday : 0));
+  return cairoTimestamp(monday.toISOString().slice(0, 10), t.dueTime);
+}
+function validDueAt(value) {
+  if (value === null || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 && n < 8640000000000000 ? n : undefined;
+}
+function validDueTime(value) { return value === '' || value === null || /^([01]\d|2[0-3]):[0-5]\d$/.test(value); }
 function todoDone(t) {
   if (t.repeat === 'daily') return t.doneOn === dayKey();
   if (t.repeat === 'weekly') return t.doneOn === weekKey();
@@ -299,13 +331,14 @@ function todoDone(t) {
 }
 function todosForClient() {
   return [...db.todos].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-    .map(t => ({ ...t, done: todoDone(t) }));
+    .map(t => ({ ...t, done: todoDone(t), dueAt: todoDueAt(t) }));
 }
 function rolloverTodos() {
   const key = dayKey();
   if (rolloverTodos.last === key) return;
   rolloverTodos.last = key;
   if (db.todos.some(t => t.repeat && t.repeat !== 'none')) broadcast('todos', todosForClient());
+  if (db.routines.length) broadcast('routines', routinesForClient());
 }
 function broadcastTodos() { broadcast('todos', todosForClient()); }
 setInterval(rolloverTodos, 60000);
@@ -314,7 +347,13 @@ app.post('/api/todos', adminAuth, (req, res) => {
   const text = String(req.body.text || '').trim().slice(0, 200);
   if (!text) return res.status(400).json({ error: 'text required' });
   const repeat = ['none', 'daily', 'weekly'].includes(req.body.repeat) ? req.body.repeat : 'none';
+  const dueAt = validDueAt(req.body.dueAt ?? null);
+  if (dueAt === undefined || !validDueTime(req.body.dueTime ?? '')) return res.status(400).json({ error: 'Invalid due date or time' });
+  const dueWeekday = Number(req.body.dueWeekday ?? 0);
+  if (!Number.isInteger(dueWeekday) || dueWeekday < 0 || dueWeekday > 6) return res.status(400).json({ error: 'Invalid weekday' });
   const item = { id: crypto.randomUUID(), text, done: false, repeat, doneOn: null,
+    dueAt: repeat === 'none' ? dueAt : null, dueTime: repeat === 'none' ? null : (req.body.dueTime || null), dueWeekday,
+    priority: ['high', 'normal', 'low'].includes(req.body.priority) ? req.body.priority : 'normal',
     order: Math.min(0, ...db.todos.map(t => t.order ?? 0)) - 1, createdAt: Date.now() };
   db.todos.unshift(item);
   db.todos = db.todos.slice(0, 50);
@@ -324,6 +363,10 @@ app.post('/api/todos', adminAuth, (req, res) => {
 app.patch('/api/todos/:id', adminAuth, (req, res) => {
   const t = db.todos.find(x => x.id === req.params.id);
   if (!t) return res.status(404).json({ error: 'not found' });
+  if (req.body.priority !== undefined && !['high', 'normal', 'low'].includes(req.body.priority)) return res.status(400).json({ error: 'Invalid priority' });
+  if (req.body.dueAt !== undefined && validDueAt(req.body.dueAt) === undefined) return res.status(400).json({ error: 'Invalid due date' });
+  if (req.body.dueTime !== undefined && !validDueTime(req.body.dueTime)) return res.status(400).json({ error: 'Invalid due time' });
+  if (req.body.dueWeekday !== undefined && (!Number.isInteger(Number(req.body.dueWeekday)) || Number(req.body.dueWeekday) < 0 || Number(req.body.dueWeekday) > 6)) return res.status(400).json({ error: 'Invalid weekday' });
   if (typeof req.body.done === 'boolean') {
     if (t.repeat === 'daily') t.doneOn = req.body.done ? dayKey() : null;
     else if (t.repeat === 'weekly') t.doneOn = req.body.done ? weekKey() : null;
@@ -332,6 +375,24 @@ app.patch('/api/todos/:id', adminAuth, (req, res) => {
   if (typeof req.body.text === 'string' && req.body.text.trim()) t.text = req.body.text.trim().slice(0, 200);
   if (['none', 'daily', 'weekly'].includes(req.body.repeat)) {
     t.repeat = req.body.repeat; t.done = false; t.doneOn = null;
+  }
+  if (req.body.priority !== undefined) {
+    if (!['high', 'normal', 'low'].includes(req.body.priority)) return res.status(400).json({ error: 'Invalid priority' });
+    t.priority = req.body.priority;
+  }
+  if (req.body.dueAt !== undefined) {
+    const dueAt = validDueAt(req.body.dueAt);
+    if (dueAt === undefined) return res.status(400).json({ error: 'Invalid due date' });
+    t.dueAt = dueAt;
+  }
+  if (req.body.dueTime !== undefined) {
+    if (!validDueTime(req.body.dueTime)) return res.status(400).json({ error: 'Invalid due time' });
+    t.dueTime = req.body.dueTime || null;
+  }
+  if (req.body.dueWeekday !== undefined) {
+    const weekday = Number(req.body.dueWeekday);
+    if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) return res.status(400).json({ error: 'Invalid weekday' });
+    t.dueWeekday = weekday;
   }
   if (req.body.action === 'up' || req.body.action === 'down') {
     const ordered = [...db.todos].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
@@ -348,6 +409,74 @@ app.delete('/api/todos/:id', adminAuth, (req, res) => {
   db.todos = db.todos.filter(x => x.id !== req.params.id);
   saveDb(); broadcastTodos();
   res.json({ ok: true });
+});
+
+// ---- Pinned note and repeating checklists ----
+function routinesForClient() {
+  return db.routines.map(r => ({ ...r, items: r.items.map(item => ({
+    ...item, done: item.doneOn === (r.repeat === 'weekly' ? weekKey() : dayKey())
+  })) }));
+}
+function broadcastRoutines() { broadcast('routines', routinesForClient()); }
+app.get('/api/note', (req, res) => res.json(db.note));
+app.post('/api/note', adminAuth, (req, res) => {
+  if (typeof req.body?.text !== 'string' || req.body.text.length > 1000) return res.status(400).json({ error: 'Note must be at most 1000 characters' });
+  db.note = { text: req.body.text.trim(), updatedAt: Date.now() };
+  saveDb(); broadcast('note', db.note); res.json(db.note);
+});
+app.get('/api/routines', (req, res) => res.json(routinesForClient()));
+app.post('/api/routines', adminAuth, (req, res) => {
+  const name = String(req.body?.name || '').trim().slice(0, 80);
+  if (!name || db.routines.length >= 10) return res.status(400).json({ error: 'Name required, maximum 10 routines' });
+  const routine = { id: crypto.randomUUID(), name, repeat: req.body.repeat === 'weekly' ? 'weekly' : 'daily', items: [] };
+  db.routines.push(routine); saveDb(); broadcastRoutines(); res.json(routine);
+});
+app.patch('/api/routines/:id', adminAuth, (req, res) => {
+  const routine = db.routines.find(r => r.id === req.params.id);
+  if (!routine) return res.status(404).json({ error: 'Routine not found' });
+  if (req.body.name !== undefined) {
+    const name = String(req.body.name).trim().slice(0, 80);
+    if (!name) return res.status(400).json({ error: 'Name required' });
+    routine.name = name;
+  }
+  if (req.body.repeat !== undefined) {
+    if (!['daily', 'weekly'].includes(req.body.repeat)) return res.status(400).json({ error: 'Invalid repeat' });
+    if (routine.repeat !== req.body.repeat) routine.items.forEach(item => { item.doneOn = null; });
+    routine.repeat = req.body.repeat;
+  }
+  saveDb(); broadcastRoutines(); res.json(routine);
+});
+app.delete('/api/routines/:id', adminAuth, (req, res) => {
+  const before = db.routines.length;
+  db.routines = db.routines.filter(r => r.id !== req.params.id);
+  if (db.routines.length === before) return res.status(404).json({ error: 'Routine not found' });
+  saveDb(); broadcastRoutines(); res.json({ ok: true });
+});
+app.post('/api/routines/:id/items', adminAuth, (req, res) => {
+  const routine = db.routines.find(r => r.id === req.params.id);
+  if (!routine) return res.status(404).json({ error: 'Routine not found' });
+  const text = String(req.body?.text || '').trim().slice(0, 120);
+  if (!text || routine.items.length >= 20) return res.status(400).json({ error: 'Text required, maximum 20 steps' });
+  const item = { id: crypto.randomUUID(), text, doneOn: null };
+  routine.items.push(item); saveDb(); broadcastRoutines(); res.json(item);
+});
+app.patch('/api/routines/:id/items/:itemId', adminAuth, (req, res) => {
+  const routine = db.routines.find(r => r.id === req.params.id);
+  const item = routine?.items.find(i => i.id === req.params.itemId);
+  if (!item) return res.status(404).json({ error: 'Step not found' });
+  if (typeof req.body.done === 'boolean') item.doneOn = req.body.done ? (routine.repeat === 'weekly' ? weekKey() : dayKey()) : null;
+  if (req.body.text !== undefined) {
+    const value = String(req.body.text).trim().slice(0, 120);
+    if (!value) return res.status(400).json({ error: 'Text required' });
+    item.text = value;
+  }
+  saveDb(); broadcastRoutines(); res.json(item);
+});
+app.delete('/api/routines/:id/items/:itemId', adminAuth, (req, res) => {
+  const routine = db.routines.find(r => r.id === req.params.id);
+  if (!routine) return res.status(404).json({ error: 'Routine not found' });
+  routine.items = routine.items.filter(i => i.id !== req.params.itemId);
+  saveDb(); broadcastRoutines(); res.json({ ok: true });
 });
 
 // ---- Display preferences and portable user data ----
@@ -373,20 +502,26 @@ app.post('/api/display', adminAuth, (req, res) => {
 app.get('/api/agent-token', adminAuth, (req, res) => res.json({ token: db.agentToken }));
 app.get('/api/export', adminAuth, (req, res) => {
   res.set('Content-Disposition', 'attachment; filename="tablet-dashboard-export.json"');
-  res.json({ format: 'tablet-dashboard-v1', exportedAt: new Date().toISOString(),
-    todos: db.todos, timers: db.timers, display: db.display });
+  res.json({ format: 'tablet-dashboard-v2', exportedAt: new Date().toISOString(),
+    todos: db.todos, timers: db.timers, display: db.display, note: db.note, routines: db.routines });
 });
 app.post('/api/import', adminAuth, (req, res) => {
   const data = req.body || {};
-  if (data.format !== 'tablet-dashboard-v1' || !Array.isArray(data.todos) || !Array.isArray(data.timers)
-      || data.todos.length > 50 || data.timers.length > 20) {
+  if (!['tablet-dashboard-v1', 'tablet-dashboard-v2'].includes(data.format) || !Array.isArray(data.todos) || !Array.isArray(data.timers)
+      || data.todos.length > 50 || data.timers.length > 20
+      || (data.routines !== undefined && (!Array.isArray(data.routines) || data.routines.length > 10
+        || data.routines.some(r => !Array.isArray(r.items) || r.items.length > 20)))) {
     return res.status(400).json({ error: 'Invalid dashboard export' });
   }
   const todos = data.todos.map((t, i) => ({
     id: crypto.randomUUID(), text: String(t.text || '').trim().slice(0, 200),
     done: !!t.done, repeat: ['daily', 'weekly'].includes(t.repeat) ? t.repeat : 'none',
     doneOn: typeof t.doneOn === 'string' ? t.doneOn.slice(0, 10) : null,
-    order: i, createdAt: Number(t.createdAt) || Date.now()
+    order: i, createdAt: Number(t.createdAt) || Date.now(),
+    dueAt: validDueAt(t.dueAt) ?? null,
+    dueTime: validDueTime(t.dueTime ?? '') ? (t.dueTime || null) : null,
+    dueWeekday: Number.isInteger(t.dueWeekday) && t.dueWeekday >= 0 && t.dueWeekday <= 6 ? t.dueWeekday : 0,
+    priority: ['high', 'normal', 'low'].includes(t.priority) ? t.priority : 'normal'
   }));
   const timers = data.timers.map(t => ({
     id: makeTimerId(), name: String(t.name || '').trim().slice(0, 60),
@@ -398,8 +533,20 @@ app.post('/api/import', adminAuth, (req, res) => {
     color: cleanColor(t.color)
   }));
   if (todos.some(t => !t.text) || timers.some(t => !t.name)) return res.status(400).json({ error: 'Export contains empty items' });
+  const routines = (data.routines || []).map(r => ({
+    id: crypto.randomUUID(), name: String(r.name || '').trim().slice(0, 80),
+    repeat: r.repeat === 'weekly' ? 'weekly' : 'daily',
+    items: r.items.map(item => ({ id: crypto.randomUUID(), text: String(item.text || '').trim().slice(0, 120),
+      doneOn: typeof item.doneOn === 'string' ? item.doneOn.slice(0, 10) : null }))
+  }));
+  if (routines.some(r => !r.name || r.items.some(i => !i.text))) return res.status(400).json({ error: 'Export contains empty routine items' });
   db.todos = todos; db.timers = timers; db.display = cleanDisplay(data.display || {});
+  if (data.format === 'tablet-dashboard-v2') {
+    db.note = { text: String(data.note?.text || '').slice(0, 1000), updatedAt: Date.now() };
+    db.routines = routines;
+  }
   saveDb(); broadcastTodos(); broadcast('timers', sortTimers(db.timers));
+  broadcast('note', db.note); broadcastRoutines();
   broadcast('display', db.display); broadcast('calendar', publicCalendar());
   res.json({ ok: true, todos: todos.length, timers: timers.length });
 });

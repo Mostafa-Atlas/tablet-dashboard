@@ -24,8 +24,9 @@
   .card > h2{margin:0 0 6px;font-size:17px;font-weight:700;letter-spacing:.02em;color:var(--txt)}
   .card .hint{margin:0 0 12px;font-size:13px;color:var(--dim)}
   /* inputs + buttons */
-  input,select,button{font-size:16px;min-height:44px;padding:10px 13px;border-radius:12px;border:1px solid #333;background:#101014;color:#fff}
-  input:focus-visible,select:focus-visible,button:focus-visible,a:focus-visible{outline:3px solid #8ab4ff;outline-offset:2px}
+  input,select,button,textarea{font-size:16px;min-height:44px;padding:10px 13px;border-radius:12px;border:1px solid #333;background:#101014;color:#fff}
+  textarea{width:100%;resize:vertical;font-family:inherit;line-height:1.4}
+  input:focus-visible,select:focus-visible,button:focus-visible,a:focus-visible,textarea:focus-visible{outline:3px solid #8ab4ff;outline-offset:2px}
   input[type="checkbox"]{width:24px;height:24px;min-height:24px;accent-color:var(--good);padding:0;flex:none;cursor:pointer}
   button{background:var(--accent);border-color:var(--accent);cursor:pointer;font-weight:600;transition:filter .15s,transform .05s}
   button:hover{filter:brightness(1.12)} button:active{transform:scale(.98)}
@@ -56,6 +57,9 @@
   ul.items .sub2{display:block;font-size:12px;color:var(--dim);text-decoration:none}
   .tag{flex:none;font-size:11px;padding:4px 10px;border:1px solid #333;border-radius:99px;color:#9a9aa5}
   .empty{padding:14px;text-align:center;color:var(--dim);font-size:14px}
+  .routine-editor{padding:12px;border:1px solid var(--line);border-radius:12px;margin:10px 0;background:#101014}
+  .routine-editor .row{align-items:center}
+  .routine-editor .row input{flex:1;min-width:130px}
   /* auth cards */
   #login-card,#setup-card{max-width:400px;margin:12vh auto 0;padding:32px;background:var(--card);
     border:1px solid var(--line);border-radius:20px;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.5)}
@@ -120,11 +124,31 @@
 
       <section class="card">
         <h2>To-Do</h2>
-        <p class="hint">Shows top 5 unchecked on the tablet</p>
+        <p class="hint">Due tasks join the Today timeline. Set a priority and optional reminder time.</p>
         <div class="row"><div class="field"><label for="todo-text">New task</label><input id="todo-text" placeholder="What needs doing?" /></div>
           <div class="field"><label for="todo-repeat">Repeat</label><select id="todo-repeat"><option value="none">Once</option><option value="daily">Daily</option><option value="weekly">Weekly</option></select></div>
+          <div class="field"><label for="todo-priority">Priority</label><select id="todo-priority"><option value="normal">Normal</option><option value="high">High</option><option value="low">Low</option></select></div></div>
+        <div class="row"><div class="field" id="todo-date-wrap"><label for="todo-due-date">Due date and time</label><input id="todo-due-date" type="datetime-local" /></div>
+          <div class="field" id="todo-time-wrap" hidden><label for="todo-due-time">Due time</label><input id="todo-due-time" type="time" /></div>
+          <div class="field" id="todo-weekday-wrap" hidden><label for="todo-weekday">Day</label><select id="todo-weekday"><option value="0">Monday</option><option value="1">Tuesday</option><option value="2">Wednesday</option><option value="3">Thursday</option><option value="4">Friday</option><option value="5">Saturday</option><option value="6">Sunday</option></select></div>
           <button id="todo-add">Add task</button></div>
         <ul class="items" id="list"></ul>
+      </section>
+
+      <section class="card">
+        <h2>Pinned note</h2>
+        <p class="hint">Save a short note from this page on your phone or PC. It appears on the tablet right away.</p>
+        <label for="note-text">Note</label><textarea id="note-text" maxlength="1000" rows="5" placeholder="A reminder, shopping list, or message"></textarea>
+        <div class="row"><button id="note-save">Save note</button><button id="note-clear" class="ghost">Clear</button></div>
+      </section>
+
+      <section class="card">
+        <h2>Routine checklists</h2>
+        <p class="hint">Check off steps here. Daily and weekly routines reset automatically.</p>
+        <div class="row"><div class="field"><label for="routine-name">New routine</label><input id="routine-name" placeholder="Morning routine" /></div>
+          <div class="field"><label for="routine-repeat">Reset</label><select id="routine-repeat"><option value="daily">Daily</option><option value="weekly">Weekly</option></select></div>
+          <button id="routine-add">Add routine</button></div>
+        <div id="routine-list"></div>
       </section>
 
       <section class="card">
@@ -156,6 +180,13 @@
         <h2>All timers</h2>
         <p class="hint">Pause, resume, rename, recolor, or mark a timer done.</p>
         <ul class="items" id="timer-list"></ul>
+      </section>
+
+      <section class="card">
+        <h2>Alarm sound</h2>
+        <p class="hint">The tablet alerts when a timer finishes or a task reaches its due time. Open the dashboard on the tablet and tap Enable sound once after loading.</p>
+        <p class="hint">For your own sound, place an MP3 named <code>alarm.mp3</code> in <code>public/audio/</code>. The built-in chime plays until that file exists.</p>
+        <div class="row"><button id="alarm-test">Test sound on this device</button></div>
       </section>
 
       <section class="card">
@@ -200,7 +231,7 @@
 
       <section class="card">
         <h2>Data and agent</h2>
-        <p class="hint">Export includes tasks, timers, and display settings. Import replaces those items and keeps your account and calendar connection.</p>
+        <p class="hint">Export includes tasks, timers, note, routines, and display settings. Import replaces those items and keeps your account and calendar connection.</p>
         <div class="row"><button id="export-btn">Export JSON</button><button id="import-btn" class="ghost">Import JSON</button><input id="import-file" type="file" accept="application/json,.json" class="visually-hidden" aria-label="Choose dashboard export to import" /></div>
         <div class="field"><label for="agent-token">PC agent token</label><input id="agent-token" type="password" readonly autocomplete="off" /></div>
         <div class="row"><button id="agent-token-toggle" class="ghost" aria-pressed="false">Show token</button></div>
