@@ -373,16 +373,25 @@ app.post('/api/timers/short', adminAuth, (req, res) => {
 });
 
 // ---- Weather (Open-Meteo, cached 30 min). 6th October city coords ----
-const WEATHER_CODE = { 0: 'Clear', 1: 'Mostly clear', 2: 'Partly cloudy', 3: 'Overcast', 45: 'Fog', 48: 'Fog', 51: 'Drizzle', 61: 'Rain', 71: 'Snow', 80: 'Showers', 95: 'Storm' };
+const WEATHER_META = {
+  0: ['Clear', '☀️'], 1: ['Mostly clear', '🌤️'], 2: ['Partly cloudy', '⛅'], 3: ['Overcast', '☁️'],
+  45: ['Fog', '🌫️'], 48: ['Fog', '🌫️'],
+  51: ['Drizzle', '🌦️'], 53: ['Drizzle', '🌦️'], 55: ['Drizzle', '🌦️'], 56: ['Freezing drizzle', '🌧️'], 57: ['Freezing drizzle', '🌧️'],
+  61: ['Rain', '🌧️'], 63: ['Rain', '🌧️'], 65: ['Heavy rain', '🌧️'], 66: ['Freezing rain', '🌧️'], 67: ['Freezing rain', '🌧️'],
+  71: ['Snow', '🌨️'], 73: ['Snow', '🌨️'], 75: ['Heavy snow', '🌨️'], 77: ['Snow grains', '🌨️'],
+  80: ['Showers', '🌦️'], 81: ['Showers', '🌦️'], 82: ['Heavy showers', '🌧️'], 85: ['Snow showers', '🌨️'], 86: ['Snow showers', '🌨️'],
+  95: ['Storm', '⛈️'], 96: ['Storm + hail', '⛈️'], 99: ['Storm + hail', '⛈️']
+};
 async function refreshWeather() {
   try {
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${WEATHER_LAT}&longitude=${WEATHER_LON}&current=temperature_2m,weather_code&timezone=Africa%2FCairo`;
     const r = await fetch(url);
     const j = await r.json();
+    const [label, icon] = WEATHER_META[j.current.weather_code] || ['—', '🌡️'];
     db.weather = {
       temp: Math.round(j.current.temperature_2m),
       code: j.current.weather_code,
-      label: WEATHER_CODE[j.current.weather_code] || '—',
+      label, icon,
       updatedAt: Date.now()
     };
     broadcast('weather', db.weather);

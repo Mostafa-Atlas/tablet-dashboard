@@ -48,7 +48,6 @@ function renderDisks(disks) {
     row.className = 'disk' + (pct >= 80 ? ' full' : '');
     const label = document.createElement('div');
     label.className = 'disk-label';
-    const free = d.freeGb != null ? ` · ${d.freeGb} GB free` : '';
     label.innerHTML = `<span>${escapeHtml(String(d.mount || d.disk || 'Disk'))}</span><b>${Math.round(pct)}%</b>`;
     const bar = document.createElement('div');
     bar.className = 'bar small';
@@ -56,7 +55,11 @@ function renderDisks(disks) {
     fill.style.width = pct + '%';
     bar.appendChild(fill);
     row.append(label, bar);
-    if (free) { const f = document.createElement('div'); f.className = 'disk-free dim'; f.textContent = free.trim().replace(/^· /, ''); row.appendChild(f); }
+    const total = d.totalGb != null ? ` of ${d.totalGb} GB` : '';
+    const f = document.createElement('div');
+    f.className = 'disk-free dim';
+    f.textContent = `${d.freeGb != null ? d.freeGb : '—'} GB free${total}`;
+    row.appendChild(f);
     box.appendChild(row);
   });
 }
@@ -166,7 +169,7 @@ setInterval(tickTimers, 1000);
 
 function renderWeather(w) {
   if (!w || w.temp == null) { $('weather').textContent = '—'; return; }
-  $('weather').textContent = `${w.temp}°C ${w.label || ''}`;
+  $('weather').textContent = `${w.icon ? w.icon + ' ' : ''}${w.temp}°C ${w.label || ''}`;
 }
 
 function renderTime(t) {
