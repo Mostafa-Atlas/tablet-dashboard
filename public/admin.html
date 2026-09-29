@@ -10,7 +10,7 @@
   .shell{max-width:1080px;margin:0 auto;padding:20px 18px 80px}
   /* header */
   .appbar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:12px;
-    padding:14px 18px;margin:0 -18px 20px;background:rgba(13,13,17,.92);backdrop-filter:blur(8px);
+    padding:14px 18px;margin:0 0 20px;background:rgba(13,13,17,.92);backdrop-filter:blur(8px);
     border-bottom:1px solid var(--line)}
   .appbar .brand{font-size:19px;font-weight:800;flex:1}
   .appbar .brand small{display:block;font-size:12px;font-weight:400;color:var(--dim)}
@@ -21,25 +21,34 @@
   @media (max-width:860px){.grid{grid-template-columns:1fr}}
   .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:20px;
     box-shadow:0 8px 28px rgba(0,0,0,.35)}
-  .card > h2{margin:0 0 4px;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.14em;color:var(--dim)}
+  .card > h2{margin:0 0 6px;font-size:17px;font-weight:700;letter-spacing:.02em;color:var(--txt)}
   .card .hint{margin:0 0 12px;font-size:13px;color:var(--dim)}
-  .card .icon{font-size:22px;margin-bottom:6px}
   /* inputs + buttons */
-  input,button{font-size:15px;padding:11px 13px;border-radius:12px;border:1px solid #333;background:#101014;color:#fff}
-  input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(43,108,255,.25)}
-  input[type="checkbox"]{width:20px;height:20px;accent-color:var(--good);padding:0;flex:none;cursor:pointer}
+  input,select,button{font-size:16px;min-height:44px;padding:10px 13px;border-radius:12px;border:1px solid #333;background:#101014;color:#fff}
+  input:focus-visible,select:focus-visible,button:focus-visible,a:focus-visible{outline:3px solid #8ab4ff;outline-offset:2px}
+  input[type="checkbox"]{width:24px;height:24px;min-height:24px;accent-color:var(--good);padding:0;flex:none;cursor:pointer}
   button{background:var(--accent);border-color:var(--accent);cursor:pointer;font-weight:600;transition:filter .15s,transform .05s}
   button:hover{filter:brightness(1.12)} button:active{transform:scale(.98)}
   button:disabled{opacity:.6;cursor:wait}
   button.ghost{background:#1c1c22;border-color:#333;font-weight:500}
   button.ghost.on{border-color:var(--accent);color:#8ab4ff;background:rgba(43,108,255,.12)}
   button.danger{background:transparent;border-color:rgba(255,93,93,.5);color:#ff9a9a;padding:8px 11px}
-  .row{display:flex;gap:8px;margin:10px 0} .row input{flex:1;min-width:0} .row button{white-space:nowrap}
+  .row{display:flex;gap:8px;margin:10px 0;flex-wrap:wrap;align-items:end} .row input:not([type="checkbox"]),.row select{flex:1;min-width:0} .row button{white-space:nowrap}
+  .field{display:flex;flex:1;min-width:170px;flex-direction:column;gap:6px}
+  .field label,.field-label{font-size:13px;font-weight:600;color:var(--txt)}
+  .check-row{display:flex;align-items:center;gap:10px;min-height:44px}
+  .check-row label{cursor:pointer}
+  .item-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  .item-actions button{min-width:44px;padding:8px 10px}
+  .item-actions select{max-width:110px}
+  .presets{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+  .presets button{flex:1;min-width:95px}
+  @media(max-width:540px){.row>.field{flex-basis:100%}.row>button{flex:1}.appbar{flex-wrap:wrap}.appbar .brand{flex-basis:100%}}
   /* segmented type picker */
   .seg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
   /* lists */
   ul.items{list-style:none;margin:6px 0 0;padding:0}
-  ul.items li{display:flex;gap:10px;align-items:center;padding:11px 10px;border:1px solid transparent;border-radius:12px}
+  ul.items li{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:11px 10px;border:1px solid transparent;border-radius:12px}
   ul.items li:nth-child(odd){background:#101015}
   ul.items li:hover{border-color:var(--line)}
   ul.items .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
@@ -67,6 +76,7 @@
   details.howto summary{cursor:pointer;color:#8ab4ff}
   details.howto ol{margin:8px 0;padding-left:20px}
   .ok-dot{color:var(--good)} .bad-dot{color:var(--bad)}
+  .visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 </style>
 </head>
 <body>
@@ -74,14 +84,13 @@
 <!-- First boot: create the admin account -->
 <div class="shell" id="setup-shell" style="display:none">
   <div id="setup-card" style="display:block">
-    <div class="icon">👋</div>
     <h1>Welcome</h1>
     <p class="hint">Create your admin account to control the dashboard</p>
-    <input id="setup-user" placeholder="Choose a username" autocomplete="username" />
-    <input id="setup-pass" type="password" placeholder="Choose a password (min 6 chars)" autocomplete="new-password" />
-    <input id="setup-pass2" type="password" placeholder="Repeat password" autocomplete="new-password" />
+    <label for="setup-user">Username</label><input id="setup-user" placeholder="Choose a username" autocomplete="username" />
+    <label for="setup-pass">Password (at least 6 characters)</label><input id="setup-pass" type="password" autocomplete="new-password" />
+    <label for="setup-pass2">Repeat password</label><input id="setup-pass2" type="password" autocomplete="new-password" />
     <button id="setup-btn">Create account</button>
-    <p id="setup-err"></p>
+    <p id="setup-err" role="alert"></p>
     <p><a class="btn-link" href="/">← back to display</a></p>
   </div>
 </div>
@@ -89,13 +98,12 @@
 <!-- Login -->
 <div class="shell" id="login-shell" style="display:none">
   <div id="login-card" style="display:block">
-    <div class="icon">🔒</div>
     <h1>Admin</h1>
     <p class="hint">Sign in to control the dashboard</p>
-    <input id="login-user" placeholder="Username" autocomplete="username" />
-    <input id="login-pass" type="password" placeholder="Password" autocomplete="current-password" />
+    <label for="login-user">Username</label><input id="login-user" autocomplete="username" />
+    <label for="login-pass">Password</label><input id="login-pass" type="password" autocomplete="current-password" />
     <button id="login-btn">Sign in</button>
-    <p id="login-err"></p>
+    <p id="login-err" role="alert"></p>
     <p><a class="btn-link" href="/">← back to display</a></p>
   </div>
 </div>
@@ -103,66 +111,65 @@
 <!-- Control panel -->
 <div id="panel">
   <div class="appbar">
-    <div class="brand">🎛 Control<small>tablet dashboard</small></div>
-    <a class="btn-link" href="/">📺 Display</a>
+    <div class="brand">Control<small>tablet dashboard</small></div>
+    <a class="btn-link" href="/">Display</a>
     <button id="logout-btn" class="ghost">Log out</button>
   </div>
   <div class="shell">
     <div class="grid">
 
       <section class="card">
-        <div class="icon">✅</div>
         <h2>To-Do</h2>
         <p class="hint">Shows top 5 unchecked on the tablet</p>
-        <div class="row"><input id="todo-text" placeholder="New task…" /><button id="todo-add">Add</button></div>
+        <div class="row"><div class="field"><label for="todo-text">New task</label><input id="todo-text" placeholder="What needs doing?" /></div>
+          <div class="field"><label for="todo-repeat">Repeat</label><select id="todo-repeat"><option value="none">Once</option><option value="daily">Daily</option><option value="weekly">Weekly</option></select></div>
+          <button id="todo-add">Add task</button></div>
         <ul class="items" id="list"></ul>
       </section>
 
       <section class="card">
-        <div class="icon">⏱</div>
         <h2>New timer</h2>
         <p class="hint">Every timer has a name — long counts days, short counts today</p>
-        <div class="row"><input id="tm-name" placeholder="Timer name (e.g. Exams, Gym)…" /></div>
-        <div class="row"><input id="tm-color" type="color" value="#2b6cff" title="Timer color" style="flex:none;width:56px;padding:4px;cursor:pointer" /><span class="hint" style="align-self:center">Timer color</span></div>
+        <div class="row"><div class="field"><label for="tm-name">Timer name</label><input id="tm-name" placeholder="E.g. Exams or Gym" /></div>
+          <div class="field"><label for="tm-color">Color</label><input id="tm-color" type="color" value="#2b6cff" style="width:72px;padding:4px;cursor:pointer" /></div></div>
         <div class="seg">
-          <button id="type-long" class="ghost on">📅 Long · days</button>
-          <button id="type-short" class="ghost">⏱ Short · today</button>
+          <button id="type-long" class="ghost on" aria-pressed="true">Long timer</button>
+          <button id="type-short" class="ghost" aria-pressed="false">Short timer</button>
         </div>
         <div id="long-inputs">
-          <div class="row"><input id="tm-days" type="number" value="12" min="1" placeholder="days from now" /><button id="tm-long-set">Set</button></div>
-          <div class="row"><input id="tm-date" type="date" /><button id="tm-date-set">Set date</button></div>
+          <div class="row"><div class="field"><label for="tm-long-method">Set by</label><select id="tm-long-method"><option value="days">Days from now</option><option value="date">Target date</option></select></div></div>
+          <div class="row" id="long-days-row"><div class="field"><label for="tm-days">Days from now</label><input id="tm-days" type="number" value="12" min="1" /></div></div>
+          <div class="row" id="long-date-row" hidden><div class="field"><label for="tm-date">Target date</label><input id="tm-date" type="date" /></div></div>
+          <p class="hint" id="long-preview"></p><button id="tm-long-create">Create long timer</button>
         </div>
         <div id="short-inputs" style="display:none">
-          <div class="row">
-            <input id="tm-h" type="number" value="0" min="0" max="12" placeholder="hours" />
-            <input id="tm-m" type="number" value="25" min="0" max="600" placeholder="mins" />
-            <button id="tm-short-start">Start</button>
-          </div>
-          <div class="row"><input id="tm-at" type="time" /><button id="tm-at-start">At time</button></div>
+          <div class="row"><div class="field"><label for="tm-short-method">Set by</label><select id="tm-short-method"><option value="duration">Duration</option><option value="time">Clock time</option></select></div></div>
+          <div id="short-duration-row"><div class="presets"><button class="ghost preset" data-minutes="25">25 min</button><button class="ghost preset" data-minutes="60">1 hour</button><button class="ghost preset" data-minutes="120">2 hours</button></div>
+            <div class="row"><div class="field"><label for="tm-h">Hours</label><input id="tm-h" type="number" value="0" min="0" max="12" /></div>
+              <div class="field"><label for="tm-m">Minutes</label><input id="tm-m" type="number" value="25" min="0" max="59" /></div></div></div>
+          <div class="row" id="short-time-row" hidden><div class="field"><label for="tm-at">Clock time</label><input id="tm-at" type="time" /></div></div>
+          <p class="hint" id="short-preview"></p><button id="tm-short-create">Create short timer</button>
         </div>
       </section>
 
       <section class="card">
-        <div class="icon">🗂</div>
         <h2>All timers</h2>
-        <p class="hint">Tick the box to mark done · ✕ deletes</p>
+        <p class="hint">Pause, resume, rename, recolor, or mark a timer done.</p>
         <ul class="items" id="timer-list"></ul>
       </section>
 
       <section class="card">
-        <div class="icon">🕐</div>
         <h2>Dashboard time</h2>
         <p class="hint">Shifts only the kiosk clock — timers keep real time</p>
         <div class="now-line">Now showing: <b id="dash-now">—</b></div>
-        <div class="row"><input id="tm-datetime" type="datetime-local" /><button id="time-set">Set</button></div>
+        <div class="row"><div class="field"><label for="tm-datetime">Date and time to display</label><input id="tm-datetime" type="datetime-local" /></div><button id="time-set">Set display time</button></div>
         <div class="row"><button id="time-reset" class="ghost">Reset to real time</button></div>
       </section>
 
       <section class="card" style="grid-column:1/-1">
-        <div class="icon">📅</div>
         <h2>Google Calendar</h2>
         <p class="hint">Tablet shows your next event · <span id="cal-status"><span class="bad-dot">●</span> not connected</span></p>
-        <div class="row"><input id="cal-ics" placeholder="Paste private ICS / iCal URL…" /><button id="cal-save">Connect</button></div>
+        <div class="row"><div class="field"><label for="cal-ics">Private ICS / iCal URL</label><input id="cal-ics" type="url" placeholder="https://…" /></div><button id="cal-save">Connect</button></div>
         <div class="row"><button id="cal-clear" class="ghost">Disconnect</button></div>
         <div class="now-line" id="cal-next" style="display:none"></div>
         <details class="howto">
@@ -175,11 +182,36 @@
         </details>
       </section>
 
+      <section class="card">
+        <h2>Tablet display</h2>
+        <p class="hint">Preview changes on the tablet as soon as you save.</p>
+        <div class="row"><div class="field"><label for="display-mode">Layout</label><select id="display-mode"><option value="overview">Overview</option><option value="focus">Focus on today and timers</option></select></div>
+          <div class="field"><label for="display-text">Text size</label><select id="display-text"><option value="normal">Normal</option><option value="large">Large</option></select></div></div>
+        <div class="check-row"><input id="show-calendar" type="checkbox" checked /><label for="show-calendar">Show calendar</label></div>
+        <div class="check-row"><input id="show-todos" type="checkbox" checked /><label for="show-todos">Show to-dos</label></div>
+        <div class="check-row"><input id="show-timers" type="checkbox" checked /><label for="show-timers">Show timers</label></div>
+        <div class="check-row"><input id="show-pc" type="checkbox" checked /><label for="show-pc">Show PC stats</label></div>
+        <div class="check-row"><input id="display-privacy" type="checkbox" /><label for="display-privacy">Hide calendar titles and locations</label></div>
+        <div class="check-row"><input id="quiet-enabled" type="checkbox" /><label for="quiet-enabled">Dim during quiet hours</label></div>
+        <div class="row"><div class="field"><label for="quiet-start">Dim from</label><input id="quiet-start" type="time" value="23:00" /></div>
+          <div class="field"><label for="quiet-end">Until</label><input id="quiet-end" type="time" value="07:00" /></div></div>
+        <button id="display-save">Save display settings</button>
+      </section>
+
+      <section class="card">
+        <h2>Data and agent</h2>
+        <p class="hint">Export includes tasks, timers, and display settings. Import replaces those items and keeps your account and calendar connection.</p>
+        <div class="row"><button id="export-btn">Export JSON</button><button id="import-btn" class="ghost">Import JSON</button><input id="import-file" type="file" accept="application/json,.json" class="visually-hidden" aria-label="Choose dashboard export to import" /></div>
+        <div class="field"><label for="agent-token">PC agent token</label><input id="agent-token" type="password" readonly autocomplete="off" /></div>
+        <div class="row"><button id="agent-token-toggle" class="ghost" aria-pressed="false">Show token</button></div>
+        <p class="hint">Set <code>AGENT_TOKEN</code> to this value on the Windows PC running the agent.</p>
+      </section>
+
     </div>
   </div>
 </div>
 
-<div id="msg"></div>
+<div id="msg" role="status" aria-live="polite"></div>
 <script src="js/admin.js"></script>
 </body>
 </html>

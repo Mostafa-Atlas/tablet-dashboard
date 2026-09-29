@@ -18,22 +18,36 @@ function tickClock() {
 setInterval(tickClock, 1000); tickClock();
 
 /* ---------- PC + storage ---------- */
+let lastPC = null;
+let serverClockOffsetMs = 0;
 function renderPC(pc) {
   pc = pc || {};
-  setBar('cpu', pc.cpu); setBar('gpu', pc.gpu); setBar('ram', pc.ram);
+  lastPC = pc;
+  setBar('cpu', pc.updatedAt ? pc.cpu : null);
+  setBar('gpu', pc.updatedAt ? pc.gpu : null);
+  setBar('ram', pc.updatedAt ? pc.ram : null);
   const temps = [];
   if (pc.cpuTemp != null) temps.push(`CPU ${pc.cpuTemp}°C`);
   if (pc.gpuTemp != null) temps.push(`GPU ${pc.gpuTemp}°C`);
   $('temps').textContent = temps.join(' · ') || '—';
   renderDisks(pc.disks);
+  refreshPCStatus();
+}
+function refreshPCStatus() {
+  const pc = lastPC || {};
   // age can read negative when tablet/server clocks differ -> clamp
-  const age = pc.updatedAt ? Math.max(0, Math.round((Date.now() - pc.updatedAt) / 1000)) : 999;
+  const age = pc.updatedAt ? Math.max(0, Math.round((Date.now() + serverClockOffsetMs - pc.updatedAt) / 1000)) : 999;
   const pill = $('pc-state');
   if (age < 10) { pill.textContent = 'PC ONLINE'; pill.className = 'pill ok'; }
   else { pill.textContent = 'PC OFFLINE'; pill.className = 'pill bad'; }
   $('pc-age').textContent = pc.updatedAt ? (age <= 2 ? 'updated just now' : `updated ${age}s ago`) : 'agent not connected yet';
 }
 function setBar(k, v) {
+  if (v == null) {
+    $(k + '-v').textContent = '—';
+    $(k + '-b').style.width = '0%';
+    return;
+  }
   v = Math.max(0, Math.min(100, Number(v) || 0));
   $(k + '-v').textContent = Math.round(v) + '%';
   $(k + '-b').style.width = v + '%';
@@ -133,7 +147,7 @@ function tickTimers() {
     else if (tm.pausedLeftSec != null) { leftMs = tm.pausedLeftSec * 1000; paused = true; }
     if (leftMs == null) { leftEl.textContent = '--:--'; fill.style.width = '0%'; badge.textContent = ''; return; }
     if (leftMs <= 0 && !paused) {
-      card.classList.add('fired');
+      card.classList.toggle('fired', now - tm.targetAt < 30000);
       leftEl.textContent = tm.type === 'long' ? '🎉 DONE' : '⏰ TIME UP';
       fill.style.width = '100%';
       badge.textContent = '';
@@ -169,7 +183,8 @@ setInterval(tickTimers, 1000);
 
 function renderWeather(w) {
   if (!w || w.temp == null) { $('weather').textContent = '—'; return; }
-  $('weather').textContent = `${w.icon ? w.icon + ' ' : ''}${w.temp}°C ${w.label || ''}`;
+  const stale = Date.now() + serverClockOffsetMs - (w.updatedAt || 0) > 90 * 60 * 1000;
+  $('weather').textContent = `${w.icon ? w.icon + ' ' : ''}${w.temp}°C ${w.label || ''}${stale ? ' · stale' : ''}`;
 }
 
 function renderTime(t) {
@@ -189,9 +204,9 @@ function renderEvent(cal) {
     return;
   }
   const now = Date.now();
-  const dn = dashboardNow();
-  const dayStart = new Date(dn.getFullYear(), dn.getMonth(), dn.getDate()).getTime() - clockOffsetSec * 1000;
-  const dayEnd = dayStart + 86400000;
+  const dn = new Date();
+  const dayStart = new Date(dn.getFullYear(), dn.getMonth(), dn.getDate()).getTime();
+  const dayEnd = new Date(dn.getFullYear(), dn.getMonth(), dn.getDate() + 1).getTime();
   const list = (cal.upcoming || [])
     .filter(e => e.startMs < dayEnd && e.endMs > dayStart)
     .sort((a, b) => a.startMs - b.startMs);
@@ -223,8 +238,8 @@ function renderEvent(cal) {
     const past = e.endMs <= now, live = e.startMs <= now && now < e.endMs;
     const item = document.createElement('div');
     item.className = 'tl-item' + (past ? ' past' : '') + (live ? ' live' : '');
-    const s = new Date(e.startMs + clockOffsetSec * 1000);
-    const en = new Date(e.endMs + clockOffsetSec * 1000);
+    const s = new Date(e.startMs);
+    const en = new Date(e.endMs);
     const t = document.createElement('div');
     t.className = 'tl-time';
     t.textContent = fmtTime(s) + ' – ' + fmtTime(en);
@@ -264,14 +279,48 @@ function relTime(startMs, ongoing) {
   return `in ${Math.round(s / 86400)}d`;
 }
 
+/* ---------- Kiosk display and connection state ---------- */
+let display = {};
+let streamConnected = false;
+let lastStreamAt = 0;
+function quietNow(start, end) {
+  const d = new Date(), hhmm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  return start <= end ? hhmm >= start && hhmm < end : hhmm >= start || hhmm < end;
+}
+function applyDisplay(prefs) {
+  display = prefs || display;
+  document.body.classList.toggle('focus', display.mode === 'focus');
+  document.body.classList.toggle('large-text', display.textSize === 'large');
+  document.body.classList.toggle('quiet', !!display.quietEnabled && quietNow(display.quietStart || '23:00', display.quietEnd || '07:00'));
+  $('pc-card').hidden = display.showPC === false;
+  $('timer-card').hidden = display.showTimers === false;
+  $('today-section').hidden = display.showCalendar === false;
+  $('todo-section').hidden = display.showTodos === false;
+  $('pc-state').hidden = display.showPC === false || display.mode === 'focus';
+}
+function updateConnection() {
+  const online = streamConnected && Date.now() - lastStreamAt < 45000;
+  const pill = $('dashboard-state');
+  pill.textContent = online ? 'DASHBOARD LIVE' : 'RECONNECTING';
+  pill.className = 'pill ' + (online ? 'ok' : 'bad');
+}
+function renderSnapshot(j) {
+  serverClockOffsetMs = Number(j.now) ? Number(j.now) - Date.now() : serverClockOffsetMs;
+  renderPC(j.pc); renderTodos(j.todos); renderTimers(j.timers); renderWeather(j.weather);
+  renderTime(j.time); applyDisplay(j.display); renderEvent(j.calendar);
+}
+
 async function boot() {
   try {
     const j = await (await fetch('/api/snapshot')).json();
-    renderPC(j.pc); renderTodos(j.todos); renderTimers(j.timers); renderWeather(j.weather); renderTime(j.time); renderEvent(j.calendar);
+    renderSnapshot(j);
   } catch {}
   const es = new EventSource('/api/stream');
+  es.onopen = () => { streamConnected = true; lastStreamAt = Date.now(); updateConnection(); };
+  es.onerror = () => { streamConnected = false; updateConnection(); };
+  es.addEventListener('heartbeat', () => { lastStreamAt = Date.now(); updateConnection(); });
   es.addEventListener('snapshot', e => {
-    try { const j = JSON.parse(e.data); renderPC(j.pc); renderTodos(j.todos); renderTimers(j.timers); renderWeather(j.weather); renderTime(j.time); renderEvent(j.calendar); } catch {}
+    try { lastStreamAt = Date.now(); renderSnapshot(JSON.parse(e.data)); updateConnection(); } catch {}
   });
   es.addEventListener('pc', e => { try { renderPC(JSON.parse(e.data)); } catch {} });
   es.addEventListener('todos', e => { try { renderTodos(JSON.parse(e.data)); } catch {} });
@@ -279,9 +328,11 @@ async function boot() {
   es.addEventListener('weather', e => { try { renderWeather(JSON.parse(e.data)); } catch {} });
   es.addEventListener('time', e => { try { renderTime(JSON.parse(e.data)); } catch {} });
   es.addEventListener('calendar', e => { try { renderEvent(JSON.parse(e.data)); } catch {} });
+  es.addEventListener('display', e => { try { applyDisplay(JSON.parse(e.data)); } catch {} });
   setInterval(async () => {
     try { renderWeather(await (await fetch('/api/weather')).json()); } catch {}
   }, 60000);
   setInterval(() => { if (lastCal) renderEvent(lastCal); }, 30000); // refresh "in Xm" countdowns
+  setInterval(() => { refreshPCStatus(); updateConnection(); applyDisplay(); }, 5000);
 }
 boot();

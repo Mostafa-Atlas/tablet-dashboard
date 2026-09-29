@@ -1,6 +1,5 @@
 require('dotenv').config();
 const express = require('express');
-const cors = require('cors');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
@@ -17,13 +16,18 @@ const WEATHER_LAT = process.env.WEATHER_LAT || '29.9668';
 const WEATHER_LON = process.env.WEATHER_LON || '30.9333';
 
 const app = express();
-app.use(cors());
 app.use(express.json({ limit: '256kb' }));
 
 // ---- Tiny JSON file DB (no native deps, Docker + Windows friendly) ----
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 const DB_FILE = path.join(DATA_DIR, 'db.json');
+const BACKUP_FILE = path.join(DATA_DIR, 'db.json.bak');
+const DEFAULT_DISPLAY = {
+  mode: 'overview', textSize: 'normal', privacy: false,
+  showPC: true, showTimers: true, showTodos: true, showCalendar: true,
+  quietEnabled: false, quietStart: '23:00', quietEnd: '07:00'
+};
 
 function defaultDb() {
   return {
@@ -43,14 +47,34 @@ function defaultDb() {
     time: { offsetSec: 0, updatedAt: 0 }, // dashboard clock = real time + offset (set from /admin)
     settings: { icsUrl: '' }, // Google Calendar private ICS URL (set from /admin)
     calendar: { next: null, upcoming: [], updatedAt: 0, error: null, configured: false },
-    users: [] // { user, salt, hash, createdAt } — created via first-boot setup page
+    users: [], // { user, salt, hash, createdAt } — created via first-boot setup page
+    agentToken: crypto.randomBytes(32).toString('hex'),
+    display: { ...DEFAULT_DISPLAY }
   };
 }
 
 function loadDb() {
-  try {
-    if (fs.existsSync(DB_FILE)) return JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-  } catch (e) { console.error('db load failed, resetting', e.message); }
+  if (fs.existsSync(DB_FILE)) {
+    try { return JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); }
+    catch (e) {
+      console.error('db load failed:', e.message);
+      if (fs.existsSync(BACKUP_FILE)) {
+        try {
+          const restored = JSON.parse(fs.readFileSync(BACKUP_FILE, 'utf8'));
+          fs.copyFileSync(BACKUP_FILE, DB_FILE);
+          console.error('restored last backup');
+          return restored;
+        }
+        catch (backupError) { console.error('backup load failed:', backupError.message); }
+      }
+      throw new Error('Database and backup could not be loaded; refusing to reset user data');
+    }
+  }
+  if (fs.existsSync(BACKUP_FILE)) {
+    const restored = JSON.parse(fs.readFileSync(BACKUP_FILE, 'utf8'));
+    fs.copyFileSync(BACKUP_FILE, DB_FILE);
+    return restored;
+  }
   const d = defaultDb();
   fs.writeFileSync(DB_FILE, JSON.stringify(d, null, 2));
   return d;
@@ -62,6 +86,8 @@ if (!db.time || typeof db.time.offsetSec !== 'number') { db.time = { offsetSec: 
 if (!db.settings || typeof db.settings.icsUrl !== 'string') { db.settings = { icsUrl: '' }; saveDb(); }
 if (!db.calendar || typeof db.calendar !== 'object') { db.calendar = { next: null, upcoming: [], updatedAt: 0, error: null, configured: false }; saveDb(); }
 if (!Array.isArray(db.calendar.upcoming)) { db.calendar.upcoming = []; saveDb(); }
+if (!db.agentToken) { db.agentToken = crypto.randomBytes(32).toString('hex'); saveDb(); }
+if (!db.display) { db.display = { ...DEFAULT_DISPLAY }; saveDb(); }
 // migrate old single long/short timer object -> named timers array
 if (db.timers && !Array.isArray(db.timers)) {
   const arr = [];
@@ -82,9 +108,17 @@ if (db.timers && !Array.isArray(db.timers)) {
   db.timers = arr; saveDb();
 }
 function saveDb() {
-  fs.writeFile(DB_FILE, JSON.stringify(db, null, 2), () => {});
+  const temp = DB_FILE + '.tmp';
+  try {
+    fs.writeFileSync(temp, JSON.stringify(db, null, 2));
+    if (fs.existsSync(DB_FILE)) fs.copyFileSync(DB_FILE, BACKUP_FILE);
+    fs.renameSync(temp, DB_FILE);
+  } catch (e) {
+    console.error('db save failed:', e);
+    throw e;
+  }
 }
-setInterval(saveDb, 15 * 1000);
+setInterval(() => { try { saveDb(); } catch {} }, 15 * 1000);
 
 // ---- SSE clients ----
 const sseClients = new Set();
@@ -208,21 +242,33 @@ app.get('/api/stream', (req, res) => {
   sseClients.add(res);
   // push current snapshot immediately
   res.write(`event: snapshot\ndata: ${JSON.stringify(snapshot())}\n\n`);
-  req.on('close', () => sseClients.delete(res));
+  const heartbeat = setInterval(() => {
+    try { res.write(`event: heartbeat\ndata: ${Date.now()}\n\n`); }
+    catch { clearInterval(heartbeat); sseClients.delete(res); }
+  }, 15000);
+  req.on('close', () => { clearInterval(heartbeat); sseClients.delete(res); });
 });
 
+function publicCalendar() {
+  if (!db.display.privacy) return db.calendar;
+  const redact = e => e ? { ...e, summary: 'Private event', location: '' } : null;
+  return { ...db.calendar, next: redact(db.calendar.next), upcoming: db.calendar.upcoming.map(redact) };
+}
 function snapshot() {
-  return { now: Date.now(), pc: db.pc, todos: db.todos, timers: db.timers, weather: db.weather, time: db.time, calendar: db.calendar };
+  rolloverTodos();
+  return { now: Date.now(), pc: db.pc, todos: todosForClient(), timers: sortTimers(db.timers),
+    weather: db.weather, time: db.time, calendar: publicCalendar(), display: db.display };
 }
 app.get('/api/snapshot', (req, res) => res.json(snapshot()));
 
 // ---- PC stats: agent POSTs here every ~2s ----
 app.post('/api/pc', (req, res) => {
+  if (req.get('Authorization') !== `Bearer ${db.agentToken}`) return res.status(401).json({ error: 'Agent token required' });
   const b = req.body || {};
   db.pc = {
     cpu: num(b.cpu, 0),
     ram: num(b.ram, 0),
-    gpu: num(b.gpu, 0),
+    gpu: b.gpu == null ? null : num(b.gpu, null),
     gpuTemp: b.gpuTemp ?? null,
     cpuTemp: b.cpuTemp ?? null,
     uptimeSec: num(b.uptimeSec, 0),
@@ -236,28 +282,126 @@ app.post('/api/pc', (req, res) => {
 app.get('/api/pc', (req, res) => res.json(db.pc));
 
 // ---- Todos ----
-app.get('/api/todos', (req, res) => res.json(db.todos));
+const cairoDate = new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' });
+function dayKey(now = Date.now()) {
+  const parts = Object.fromEntries(cairoDate.formatToParts(now).map(p => [p.type, p.value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+function weekKey(now = Date.now()) {
+  const day = new Date(dayKey(now) + 'T00:00:00Z');
+  day.setUTCDate(day.getUTCDate() - (day.getUTCDay() + 6) % 7);
+  return day.toISOString().slice(0, 10);
+}
+function todoDone(t) {
+  if (t.repeat === 'daily') return t.doneOn === dayKey();
+  if (t.repeat === 'weekly') return t.doneOn === weekKey();
+  return !!t.done;
+}
+function todosForClient() {
+  return [...db.todos].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    .map(t => ({ ...t, done: todoDone(t) }));
+}
+function rolloverTodos() {
+  const key = dayKey();
+  if (rolloverTodos.last === key) return;
+  rolloverTodos.last = key;
+  if (db.todos.some(t => t.repeat && t.repeat !== 'none')) broadcast('todos', todosForClient());
+}
+function broadcastTodos() { broadcast('todos', todosForClient()); }
+setInterval(rolloverTodos, 60000);
+app.get('/api/todos', (req, res) => res.json(todosForClient()));
 app.post('/api/todos', adminAuth, (req, res) => {
   const text = String(req.body.text || '').trim().slice(0, 200);
   if (!text) return res.status(400).json({ error: 'text required' });
-  const item = { id: String(Date.now()), text, done: false, createdAt: Date.now() };
+  const repeat = ['none', 'daily', 'weekly'].includes(req.body.repeat) ? req.body.repeat : 'none';
+  const item = { id: crypto.randomUUID(), text, done: false, repeat, doneOn: null,
+    order: Math.min(0, ...db.todos.map(t => t.order ?? 0)) - 1, createdAt: Date.now() };
   db.todos.unshift(item);
   db.todos = db.todos.slice(0, 50);
-  saveDb(); broadcast('todos', db.todos);
+  saveDb(); broadcastTodos();
   res.json(item);
 });
 app.patch('/api/todos/:id', adminAuth, (req, res) => {
   const t = db.todos.find(x => x.id === req.params.id);
   if (!t) return res.status(404).json({ error: 'not found' });
-  if (typeof req.body.done === 'boolean') t.done = req.body.done;
-  if (typeof req.body.text === 'string') t.text = req.body.text.slice(0, 200);
-  saveDb(); broadcast('todos', db.todos);
+  if (typeof req.body.done === 'boolean') {
+    if (t.repeat === 'daily') t.doneOn = req.body.done ? dayKey() : null;
+    else if (t.repeat === 'weekly') t.doneOn = req.body.done ? weekKey() : null;
+    else t.done = req.body.done;
+  }
+  if (typeof req.body.text === 'string' && req.body.text.trim()) t.text = req.body.text.trim().slice(0, 200);
+  if (['none', 'daily', 'weekly'].includes(req.body.repeat)) {
+    t.repeat = req.body.repeat; t.done = false; t.doneOn = null;
+  }
+  if (req.body.action === 'up' || req.body.action === 'down') {
+    const ordered = [...db.todos].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    const index = ordered.indexOf(t), next = index + (req.body.action === 'up' ? -1 : 1);
+    if (next >= 0 && next < ordered.length) {
+      [ordered[index], ordered[next]] = [ordered[next], ordered[index]];
+      ordered.forEach((item, pos) => { item.order = pos; });
+    }
+  }
+  saveDb(); broadcastTodos();
   res.json(t);
 });
 app.delete('/api/todos/:id', adminAuth, (req, res) => {
   db.todos = db.todos.filter(x => x.id !== req.params.id);
-  saveDb(); broadcast('todos', db.todos);
+  saveDb(); broadcastTodos();
   res.json({ ok: true });
+});
+
+// ---- Display preferences and portable user data ----
+function cleanDisplay(input) {
+  const next = { ...DEFAULT_DISPLAY, ...db.display };
+  if (['overview', 'focus'].includes(input.mode)) next.mode = input.mode;
+  if (['normal', 'large'].includes(input.textSize)) next.textSize = input.textSize;
+  for (const key of ['privacy', 'showPC', 'showTimers', 'showTodos', 'showCalendar', 'quietEnabled']) {
+    if (typeof input[key] === 'boolean') next[key] = input[key];
+  }
+  for (const key of ['quietStart', 'quietEnd']) {
+    if (typeof input[key] === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(input[key])) next[key] = input[key];
+  }
+  if (!next.showPC && !next.showTimers && !next.showTodos && !next.showCalendar) next.showTodos = true;
+  return next;
+}
+app.get('/api/display', (req, res) => res.json(db.display));
+app.post('/api/display', adminAuth, (req, res) => {
+  db.display = cleanDisplay(req.body || {});
+  saveDb(); broadcast('display', db.display); broadcast('calendar', publicCalendar());
+  res.json(db.display);
+});
+app.get('/api/agent-token', adminAuth, (req, res) => res.json({ token: db.agentToken }));
+app.get('/api/export', adminAuth, (req, res) => {
+  res.set('Content-Disposition', 'attachment; filename="tablet-dashboard-export.json"');
+  res.json({ format: 'tablet-dashboard-v1', exportedAt: new Date().toISOString(),
+    todos: db.todos, timers: db.timers, display: db.display });
+});
+app.post('/api/import', adminAuth, (req, res) => {
+  const data = req.body || {};
+  if (data.format !== 'tablet-dashboard-v1' || !Array.isArray(data.todos) || !Array.isArray(data.timers)
+      || data.todos.length > 50 || data.timers.length > 20) {
+    return res.status(400).json({ error: 'Invalid dashboard export' });
+  }
+  const todos = data.todos.map((t, i) => ({
+    id: crypto.randomUUID(), text: String(t.text || '').trim().slice(0, 200),
+    done: !!t.done, repeat: ['daily', 'weekly'].includes(t.repeat) ? t.repeat : 'none',
+    doneOn: typeof t.doneOn === 'string' ? t.doneOn.slice(0, 10) : null,
+    order: i, createdAt: Number(t.createdAt) || Date.now()
+  }));
+  const timers = data.timers.map(t => ({
+    id: makeTimerId(), name: String(t.name || '').trim().slice(0, 60),
+    type: t.type === 'short' ? 'short' : 'long',
+    targetAt: Number.isFinite(Number(t.targetAt)) && t.targetAt != null ? Number(t.targetAt) : null,
+    createdAt: Number(t.createdAt) || Date.now(), done: !!t.done,
+    pausedLeftSec: Number.isFinite(Number(t.pausedLeftSec)) && t.pausedLeftSec != null ? Number(t.pausedLeftSec) : null,
+    durationSec: Number.isFinite(Number(t.durationSec)) && t.durationSec != null ? Number(t.durationSec) : null,
+    color: cleanColor(t.color)
+  }));
+  if (todos.some(t => !t.text) || timers.some(t => !t.name)) return res.status(400).json({ error: 'Export contains empty items' });
+  db.todos = todos; db.timers = timers; db.display = cleanDisplay(data.display || {});
+  saveDb(); broadcastTodos(); broadcast('timers', sortTimers(db.timers));
+  broadcast('display', db.display); broadcast('calendar', publicCalendar());
+  res.json({ ok: true, todos: todos.length, timers: timers.length });
 });
 
 // ---- Timers (multiple, each with a name) ----
@@ -289,7 +433,11 @@ app.post('/api/timers', adminAuth, (req, res) => {
     else if (b.days) targetAt = Date.now() + Number(b.days) * 24 * 3600 * 1000;
     if (!targetAt || !Number.isFinite(targetAt)) return res.status(400).json({ error: 'days, date or targetAt required' });
   } else {
-    if (b.atTime && /^\d{1,2}:\d{2}$/.test(String(b.atTime))) {
+    if (b.targetAt != null) {
+      targetAt = Number(b.targetAt);
+      if (!Number.isFinite(targetAt) || targetAt <= Date.now()) return res.status(400).json({ error: 'Choose a future end time' });
+      extra.durationSec = Math.round((targetAt - Date.now()) / 1000);
+    } else if (b.atTime && /^\d{1,2}:\d{2}$/.test(String(b.atTime))) {
       // clock time today (Africa/Cairo wall clock approximated via server local time)
       const [hh, mm] = String(b.atTime).split(':').map(Number);
       const d = new Date(); d.setHours(hh, mm, 0, 0);
@@ -313,6 +461,12 @@ app.patch('/api/timers/:id', adminAuth, (req, res) => {
   if (!t) return res.status(404).json({ error: 'not found' });
   const b = req.body || {};
   if (typeof b.name === 'string' && b.name.trim()) t.name = b.name.trim().slice(0, 60);
+  if (typeof b.targetAt !== 'undefined') {
+    const target = Number(b.targetAt);
+    if (!Number.isFinite(target) || target <= Date.now()) return res.status(400).json({ error: 'Choose a future end time' });
+    t.targetAt = target; t.pausedLeftSec = null; t.createdAt = Date.now(); t.done = false;
+    if (t.type === 'short') t.durationSec = Math.round((target - t.createdAt) / 1000);
+  }
   if (typeof b.done === 'boolean') t.done = b.done;
   if (typeof b.color !== 'undefined') t.color = cleanColor(b.color);
   if (b.action === 'pause' && t.targetAt) {
@@ -441,15 +595,15 @@ async function refreshCalendar() {
       upcoming: ics.upcoming(events, now, 14, 100),
       updatedAt: now, error: null, configured: true
     };
-    broadcast('calendar', db.calendar);
+    broadcast('calendar', publicCalendar());
   } catch (e) {
     console.error('calendar refresh failed:', e.message);
     db.calendar.error = String(e.message || e).slice(0, 160);
     db.calendar.configured = true;
-    broadcast('calendar', db.calendar);
+    broadcast('calendar', publicCalendar());
   }
 }
-app.get('/api/calendar', (req, res) => res.json(db.calendar));
+app.get('/api/calendar', (req, res) => res.json(publicCalendar()));
 // ICS URL is secret (full read access) -> admin only, never sent to kiosk.
 app.get('/api/settings', adminAuth, (req, res) => res.json({ icsUrl: db.settings.icsUrl || '' }));
 app.post('/api/settings', adminAuth, async (req, res) => {

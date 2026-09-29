@@ -4,6 +4,7 @@ Disks only refreshed every 3h (per spec) to save IO.
 
 Run:  pip install -r requirements.txt
       set SERVER=http://192.168.1.50:1200  (your home-lab IP, or Tailscale IP)
+      set AGENT_TOKEN=<token shown in /admin>
       python agent.py
 Tip: run on startup via Task Scheduler.
 """
@@ -11,6 +12,7 @@ import os, time, shutil, socket
 import urllib.request, urllib.error, json
 
 SERVER = os.environ.get("SERVER", "http://localhost:1200").rstrip("/")
+AGENT_TOKEN = os.environ.get("AGENT_TOKEN", "")
 INTERVAL = float(os.environ.get("INTERVAL", "2"))
 DISK_EVERY_SEC = 3 * 3600
 
@@ -21,7 +23,7 @@ except ImportError:
     print("WARN: psutil not installed, sending mock values. pip install psutil")
 
 def gpu_pct():
-    # Try GPUtil, else nvidia-smi, else 0
+    # Try GPUtil, else nvidia-smi; None means no supported reading.
     try:
         import GPUtil
         gpus = GPUtil.getGPUs()
@@ -36,7 +38,7 @@ def gpu_pct():
         if out: return float(out[0].strip())
     except Exception:
         pass
-    return 0
+    return None
 
 def disks_cached(cache, last):
     if time.time() - last[0] < DISK_EVERY_SEC and cache:
@@ -60,7 +62,9 @@ def disks_cached(cache, last):
 
 def post(payload):
     data = json.dumps(payload).encode()
-    req = urllib.request.Request(SERVER + "/api/pc", data=data, headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(SERVER + "/api/pc", data=data, headers={
+        "Content-Type": "application/json", "Authorization": "Bearer " + AGENT_TOKEN
+    })
     try:
         with urllib.request.urlopen(req, timeout=5) as r:
             r.read()

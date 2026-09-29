@@ -1,163 +1,93 @@
-# Tablet Dashboard v0.1 (base)
+# Tablet Dashboard
 
-10" Samsung Android kiosk display (`/`) + control page (`/admin`).
-Hosted on your home lab, reachable over LAN or Tailscale.
+A read-only kiosk display designed for a 10-inch Samsung tablet, with a separate `/admin` control page for a phone or PC. It shows a clock, today's calendar, to-dos, timers, weather, and live Windows PC stats. The display adapts to landscape and portrait widths.
 
-**Stack:** Node/Express server + Python agent (Win11).
-- Server is always-on, low RAM, pushes live updates to the tablet via SSE — Node is ideal, zero build step.
-- Win11 hardware stats (CPU/GPU/RAM/disks) are read best in Python (`psutil`, `GPUtil` / `nvidia-smi`) — `agent/agent.py` POSTs every 2s.
-- Storage: JSON file in `./data/db.json` (no native deps, works on Windows + Docker).
-- Time: 12h clock. Weather: 6th of October, Giza (Open-Meteo, cached 30 min).
+The server is Node.js/Express, the Windows PC agent is Python, and data lives in `data/db.json`. Updates reach the tablet through Server-Sent Events (SSE). The server is intended for a trusted LAN or Tailscale network; do not expose port 1200 directly to the public internet.
 
----
+## Start the server on Windows
 
-## 1. Prerequisites
-
-| Where | Need |
-|---|---|
-| Dev PC / home lab server | Node 24+, npm, (optional) Docker + Docker Compose |
-| Main PC (Win11) | Python 3.11+, `pip install -r agent/requirements.txt` |
-| Tablet (Samsung Android) | Fully Kiosk Browser (free) or Chrome |
-| Network | Same LAN, or Tailscale on all devices |
-
-## 2. Quickstart (Windows, 2 min)
+Requirements: Node.js 24+ and npm. From the project directory:
 
 ```powershell
 cd "E:\Projects\Tablet dashbaord"
-npm install
-copy .env.example .env
+npm ci
+Copy-Item .env.example .env
 node server.js
 ```
 
-Open:
-- Display → http://localhost:1200
-- Admin → http://localhost:1200/admin → create your account on first boot
+Open `http://localhost:1200/admin` and create an admin account. Open `http://localhost:1200/` for the display. Use `http://<server-LAN-or-Tailscale-IP>:1200/` on the tablet. The first display shows sample tasks and a timer until you replace them in admin.
 
-You should see mock/empty stats until the agent connects (pill shows `PC OFFLINE` — normal).
+The server listens on `0.0.0.0`; allow port 1200 only on the network you intend to use. Change `PORT` in `.env` if needed. Weather defaults to 6th of October City, Giza; change `WEATHER_LAT` and `WEATHER_LON` in `.env` for another location.
 
-## 3. Environment variables
-
-Copy `.env.example` → `.env` and edit:
-
-```
-PORT=1200
-WEATHER_LAT=29.9668           # 6th of October
-WEATHER_LON=30.9333
-DATA_DIR=./data
-# Optional legacy fallback (only used if no account created yet via setup page):
-# ADMIN_USER=admin
-# ADMIN_PASS=changeme123
-```
-
-> First boot: open `/admin` and **create your admin account** (username 3-32 chars, password min 6).
-> It's hashed (scrypt) and stored in `./data/db.json`. Setting `ADMIN_USER` + `ADMIN_PASS` env vars
-> enables an additional fallback login (for scripts/docker) — otherwise only created accounts work.
-
-Server listens on `0.0.0.0` so it works over LAN + Tailscale with no extra config.
-
-## 4. Run on home lab (Docker, recommended)
+## Run with Docker on the home lab
 
 ```bash
 cd /path/to/tablet-dashboard
 docker compose up -d --build
 docker compose logs -f
-# open http://<lab-ip>:1200  (e.g. http://192.168.1.50:1200)
 ```
 
-Data persists in `./data/db.json` (mounted to `/data` in container).
-To change admin password: edit `docker-compose.yml` → `ADMIN_PASS`, then `docker compose up -d`.
+Open `http://<lab-ip>:1200/admin` for first-time setup. The Compose volume maps `./data` to `/data`, so `db.json` and its backup survive container recreation. After an update, run `docker compose up -d --build` again.
 
-To update after a `git pull`:
-```bash
-docker compose up -d --build
-```
+## Connect the Windows PC agent
 
-## 5. Win11 agent (sends CPU/GPU/RAM)
-
-On your main Win11 PC:
+Requirements: Python 3.11+ and the dependencies in `agent/requirements.txt`. In `/admin`, open **Data and agent**, select **Show token**, and copy the PC agent token. This token is required for PC statistics updates.
 
 ```powershell
 cd "E:\Projects\Tablet dashbaord"
 pip install -r agent/requirements.txt
-$env:SERVER="http://<lab-ip>:1200"   # use home-lab LAN or Tailscale IP, NOT localhost
+$env:SERVER = "http://<lab-ip>:1200"   # or the server's Tailscale IP; not localhost on another PC
+$env:AGENT_TOKEN = "<token-from-admin>"
 python agent/agent.py
 ```
 
-Expected output: `agent -> http://<lab-ip>:1200 ...` and the tablet pill flips to `PC ONLINE`.
+The agent posts CPU, GPU, and RAM about every 2 seconds and refreshes disk information every 3 hours. If no supported GPU reading is available, the kiosk shows `—` rather than `0%`. The tablet shows **PC OFFLINE** when updates are more than 10 seconds old, even if the agent stops without disconnecting cleanly.
 
-- Posts every 2s (`INTERVAL=2` to change).
-- Disks refresh every 3h per spec.
-- GPU: tries `GPUtil` → `nvidia-smi` → falls back to 0 (AMD iGPU shows 0 in v0.1).
-- No firewall change needed on main PC (it only makes outbound POSTs).
+For Task Scheduler, run the agent at logon with both `SERVER` and `AGENT_TOKEN` in its environment. Keep the token out of shared scripts and source control. The agent only makes outbound requests from the PC.
 
-### Auto-start on boot (Task Scheduler)
+## Set up the 10-inch tablet
 
-1. Task Scheduler → Create Task → Run whether user is logged on or not.
-2. Trigger: At log on. Action: `pythonw.exe "E:\Projects\Tablet dashbaord\agent\agent.py"`.
-3. Set env `SERVER` in the script or wrap in a `.bat`:
-   ```bat
-   set SERVER=http://192.168.1.50:1200
-   pythonw "E:\Projects\Tablet dashbaord\agent\agent.py"
-   ```
+Use Fully Kiosk Browser or Chrome. Set the start URL to `http://<lab-ip>:1200/` and enable fullscreen and keep-screen-on as needed. The tablet displays information; controls stay in `/admin`.
 
-## 6. Tablet setup (Samsung Android)
+- **Overview** shows today, timers, and PC stats. **Focus** shows today and timers.
+- Portrait and narrow widths use a single column; landscape uses two or three columns based on available width.
+- In `/admin` → **Tablet display**, choose text size, visible sections, calendar privacy, and quiet hours. Quiet hours dim the page on the tablet according to the tablet's local time.
+- **DASHBOARD LIVE** reports the server stream. **RECONNECTING** means the display is waiting for it. **PC ONLINE/OFFLINE** separately reports agent freshness.
 
-1. Install **Fully Kiosk Browser**.
-2. Start URL: `http://<lab-ip>:1200`.
-3. Enable: Fullscreen, Keep Screen On, Auto-reload on network reconnect.
-4. Optional: Screen dim 11pm–7am in Fully settings.
+## Use `/admin`
 
-No touch needed — display is read-only. All control is from `/admin` on your phone/PC.
+- **To-do:** add, rename, complete, delete, and move tasks up or down. Choose **Once**, **Daily**, or **Weekly** recurrence. The kiosk shows the first five incomplete tasks in your chosen order. Daily tasks reset at the next Cairo calendar day; weekly tasks reset on Monday in Cairo time.
+- **Timers:** create a long timer by number of days or target date. Create a short timer by duration, clock time, or a 25-minute, 1-hour, or 2-hour preset. The form previews its end time. Existing timers can be renamed, given a new end time or color, paused, resumed, restarted when eligible, marked done, or deleted. Finished timers pulse for 30 seconds.
+- **Dashboard time:** shift only the kiosk clock for display. Timers still use real time.
+- **Google Calendar:** connect a secret ICS/iCal URL from Google Calendar settings. The server refreshes every 10 minutes and the kiosk shows today's events. The secret URL remains in the server's private data file. Calendar titles and locations are normally available to display clients and in `/api/calendar`; enable **Hide calendar titles and locations** for a shared screen or network. Use a trusted network either way.
+- **Data and agent:** export tasks, timers, and display settings to JSON; import replaces those items after confirmation. The export intentionally excludes the admin account, agent token, and private calendar URL.
 
-## 7. Using /admin
+The admin session lasts seven days and is stored in that browser's local storage. The password is hashed with scrypt in `data/db.json`. Keep `data/` and `.env` private and back up the `data/` directory or use the JSON export regularly.
 
-Open `http://<lab-ip>:1200/admin` and sign in on the custom login page (`ADMIN_USER` / `ADMIN_PASS`).
-Session lasts 7 days (token in browser localStorage). No browser popup — wrong creds show an inline error.
+## Check and troubleshoot
 
-- **To-do:** add, check/uncheck, delete. Kiosk shows top 5 unchecked.
-- **Timers (multiple, named):** pick 📅 Long or ⏱ Short, type a name, then:
-  - Long → days from now **or** a target date (kiosk shows `12d 4h` counting from today).
-  - Short → countdown hours/mins **or** a clock time today like `18:30` (kiosk counts down to it).
-  - All timers list below with a **checkbox** to mark done, a **color dot** to recolor, tag, and delete. Done timers show ✓ on the kiosk, each in its own color (left border + progress bar).
-- Empty to-do / empty day shows *"You have nothing to do, sir 🎩"* on the tablet.
-- **Storage:** per-disk bars on the kiosk turn red past 80%. Agent sends disks every 3h.
-- **Dashboard time:** pick date + time in `/admin` to shift the kiosk clock (shows day-month-year like `12-1-2026`), or reset to real time. Only the clock display shifts — timers keep real time.
-- **Google Calendar:** paste your calendar's **Secret address in iCal format** (Calendar Settings → Integrate calendar) into the `/admin` Calendar card → Connect. Tablet shows **today's events in a vertical timeline** (all-day chips on top, live event highlighted, `now` marker, done items dimmed), refreshed every 10 min. Supports recurring events. The URL stays server-side — never sent to the tablet.
+```powershell
+npm test
+```
 
-## 8. API reference
+The integration test uses a temporary data directory; it checks agent authentication, tasks, timers, privacy, import/export, and backup recovery. It does not contact your running server.
 
-| Method | Endpoint | Auth | Notes |
-|---|---|---|---|
-| GET | `/api/health` | no | `{ ok, sseClients, pcAgeSec }` |
-| GET | `/api/snapshot` | no | full state for first paint |
-| GET | `/api/stream` | no | SSE: `snapshot, pc, todos, timers, weather` |
-| GET/POST | `/api/pc` | no (POST open for LAN agent) | agent POSTs `{ cpu, ram, gpu, disks }` |
-| GET | `/api/todos` | no | list |
-| POST/PATCH/DELETE | `/api/todos…` | admin token (Bearer) | mutate |
-| GET | `/api/timers` | no | `{ long, short }` |
-| GET | `/api/timers` | no | named timers array |
-| POST | `/api/timers` | admin token (Bearer) | `{ name, type: long\|short, days\|date\|targetAt, hours\|mins\|atTime }` |
-| PATCH | `/api/timers/:id` | admin token (Bearer) | `{ name?, done?, action: pause\|resume\|reset }` |
-| DELETE | `/api/timers/:id` | admin token (Bearer) | remove |
-| POST | `/api/setup` | no (only when no users exist) | `{ user, pass }` → `{ token }` — first-boot create |
-| POST | `/api/login` | no | `{ user, pass }` → `{ token }` |
-| GET | `/api/me` | no | `{ loggedIn }` |
-| GET | `/api/weather` | no | cached Open-Meteo |
-| GET | `/api/calendar` | no | `{ next, upcoming[], updatedAt, error, configured }` (no secret URL) |
-| GET | `/api/settings` | admin token | `{ icsUrl }` |
-| POST | `/api/settings` | admin token | `{ icsUrl }` → saves + refreshes calendar |
+- **PC OFFLINE:** check that `SERVER` points to the lab or Tailscale address and `AGENT_TOKEN` matches `/admin`. Check `http://<lab-ip>:1200/api/health` from the PC.
+- **RECONNECTING:** check that the tablet can reach the server. The page reconnects automatically when the network returns.
+- **Weather unavailable or stale:** the server could not reach Open-Meteo. Check connectivity and server logs.
+- **Cannot sign in:** use the account created on first boot. There is no default password. Restore a known-good `data/` backup if credentials are lost; deleting `db.json` resets all dashboard data and is a last resort.
+- **Damaged `db.json`:** the server tries `db.json.bak`. If both are invalid, it refuses to start rather than silently replacing your data. Restore your external backup.
 
-## 9. Troubleshooting
+### Main API endpoints
 
-- **PC OFFLINE on tablet:** agent not reaching server. Check `$env:SERVER` uses lab IP, not localhost. `curl http://<lab-ip>:1200/api/health` from main PC.
-- **Can't log in on /admin:** on first boot you must **create** the account on the setup screen — there is no default password. If you forgot it, stop the server, delete the `users` array in `./data/db.json` (or the whole file to reset), restart, and create a new one. Scripts can still use HTTP Basic on the API with the created account.
-- **Weather shows —:** no internet on server or Open-Meteo blocked. Server caches last value; check logs.
-- **Port in use:** change `PORT` in `.env` (e.g. `8090`).
-- **Push rejected:** repo is private — `git pull --rebase` then push, or use a PAT with `repo` scope.
+| Endpoint | Access | Purpose |
+|---|---|---|
+| `GET /api/snapshot`, `/api/stream` | Display clients | Initial state and live updates |
+| `GET /api/health` | Display clients | Server and PC freshness |
+| `POST /api/pc` | Agent bearer token | Windows PC stats |
+| `GET /api/todos`, `/api/timers`, `/api/calendar`, `/api/display` | Display clients | Read-only dashboard data |
+| `POST/PATCH/DELETE /api/todos`, `/api/timers` | Admin bearer token | Edit tasks and timers |
+| `POST /api/display`, `/api/settings`, `/api/time` | Admin bearer token | Display, calendar, and clock settings |
+| `GET /api/export`, `POST /api/import`, `GET /api/agent-token` | Admin bearer token | Backup and agent setup |
 
-## 10. v0.2 next
-
-- Google Calendar next-event (`/api/calendar` OAuth/ICS)
-- GPU temp via LibreHardwareMonitor, storage graph
-- Timer alarm flash + short presets
-- SQLite move if `db.json` outgrows use
+Browser requests stay on the same origin; cross-origin API access is not enabled. Keep the server reachable only from devices you trust.

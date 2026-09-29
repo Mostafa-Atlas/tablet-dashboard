@@ -15,11 +15,28 @@
     </div>
     <div class="tb-right">
       <span id="weather">--°C —</span>
+      <span id="dashboard-state" class="pill bad">CONNECTING</span>
       <span id="pc-state" class="pill">PC …</span>
     </div>
   </header>
 
   <main id="grid">
+    <section class="card" id="life-card">
+      <div id="today-section">
+        <h2>Today</h2>
+        <div id="event" class="tl-wrap"><span class="dim">Loading…</span></div>
+      </div>
+      <div id="todo-section">
+        <h2 class="mt">To-Do</h2>
+        <ul id="todos"><li class="dim">Loading…</li></ul>
+      </div>
+    </section>
+
+    <section class="card center" id="timer-card">
+      <h2 class="left">Timers</h2>
+      <div id="timers"><div class="dim">Loading…</div></div>
+    </section>
+
     <section class="card" id="pc-card">
       <h2>PC Status</h2>
       <div class="stat"><label>CPU <b id="cpu-v">–</b></label><div class="bar"><i id="cpu-b"></i></div></div>
@@ -29,19 +46,6 @@
       <h2 class="mt">Storage</h2>
       <div id="disks"><div class="dim sub">Waiting for agent…</div></div>
       <div class="sub dim" id="pc-age"></div>
-    </section>
-
-    <section class="card center" id="timer-card">
-      <h2 class="left">Timers</h2>
-      <div id="timers"><div class="dim">Loading…</div></div>
-      <div class="sub dim">Manage from /admin</div>
-    </section>
-
-    <section class="card" id="life-card">
-      <h2>To-Do</h2>
-      <ul id="todos"><li class="dim">Loading…</li></ul>
-      <h2 class="mt">Today</h2>
-      <div id="event" class="tl-wrap"><span class="dim">Loading…</span></div>
     </section>
   </main>
 </div>
