@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dashboard Admin</title>
+<link rel="stylesheet" href="css/style.css" />
+<style>body{overflow:auto} .wrap{max-width:640px;margin:24px auto;padding:0 16px} input,button{font-size:16px;padding:10px;border-radius:10px;border:1px solid #333;background:#161616;color:#fff} button{background:#2b6cff;border-color:#2b6cff;cursor:pointer} .row{display:flex;gap:8px;margin:8px 0} .row input{flex:1} li{display:flex;gap:8px;align-items:center;padding:8px;border-bottom:1px solid #222} a{color:#8ab4ff}</style>
+</head>
+<body>
+<div class="wrap">
+  <p><a href="/">← back to display</a></p>
+  <h1>Admin</h1>
+  <p class="sub dim">Browser will ask for user/pass (Basic Auth). Same for API.</p>
+
+  <h2>Add to-do</h2>
+  <div class="row"><input id="todo-text" placeholder="New task…" /><button id="todo-add">Add</button></div>
+  <ul id="list"></ul>
+
+  <h2>Long timer (days)</h2>
+  <div class="row"><input id="long-days" type="number" value="12" min="1" /><button id="long-set">Set</button></div>
+
+  <h2>Short timer</h2>
+  <div class="row">
+    <input id="sh-h" type="number" value="0" min="0" max="12" placeholder="h" />
+    <input id="sh-m" type="number" value="25" min="1" max="600" placeholder="m" />
+    <button id="sh-start">Start</button>
+  </div>
+  <div class="row">
+    <button id="sh-pause">Pause</button>
+    <button id="sh-resume">Resume</button>
+    <button id="sh-reset">Reset</button>
+  </div>
+  <p id="msg" class="sub"></p>
+</div>
+<script src="js/admin.js"></script>
+</body>
+</html>

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tablet Dashboard</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <div class="tb-left">
+      <span id="clock">--:-- --</span>
+      <span id="date">—</span>
+    </div>
+    <div class="tb-right">
+      <span id="weather">--°C —</span>
+      <span id="pc-state" class="pill">PC …</span>
+    </div>
+  </header>
+
+  <main id="grid">
+    <section class="card" id="pc-card">
+      <h2>PC Status</h2>
+      <div class="stat"><label>CPU <b id="cpu-v">–</b></label><div class="bar"><i id="cpu-b"></i></div></div>
+      <div class="stat"><label>GPU <b id="gpu-v">–</b></label><div class="bar"><i id="gpu-b"></i></div></div>
+      <div class="stat"><label>RAM <b id="ram-v">–</b></label><div class="bar"><i id="ram-b"></i></div></div>
+      <div class="sub" id="temps">—</div>
+      <div class="sub" id="disks">Storage: waiting for agent…</div>
+      <div class="sub dim" id="pc-age"></div>
+    </section>
+
+    <section class="card center" id="timer-card">
+      <h2 id="long-label">Long term</h2>
+      <div id="long-left">–</div>
+      <div class="bar big"><i id="long-b"></i></div>
+      <div class="short-row">
+        <span id="short-label">Focus</span>
+        <span id="short-left">–</span>
+      </div>
+      <div class="sub dim">Control from /admin</div>
+    </section>
+
+    <section class="card" id="life-card">
+      <h2>To-Do</h2>
+      <ul id="todos"><li class="dim">Loading…</li></ul>
+      <h2 class="mt">Next event</h2>
+      <div id="event" class="sub">Calendar connects in v0.2</div>
+    </section>
+  </main>
+</div>
+<script src="js/kiosk.js"></script>
+</body>
+</html>

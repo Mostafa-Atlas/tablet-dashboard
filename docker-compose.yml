@@ -1,0 +1,14 @@
+services:
+  dashboard:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - ADMIN_USER=admin
+      - ADMIN_PASS=changeme123
+      - WEATHER_LAT=29.9668
+      - WEATHER_LON=30.9333
+    volumes:
+      - ./data:/data
+    restart: unless-stopped

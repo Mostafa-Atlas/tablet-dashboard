@@ -1,0 +1,23 @@
+*{box-sizing:border-box} html,body{height:100%}
+body{margin:0;background:#0b0b0d;color:#f2f2f2;font-family:system-ui,Segoe UI,Roboto,Arial;overflow:hidden}
+#app{height:100vh;display:flex;flex-direction:column}
+#topbar{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;font-size:22px;border-bottom:1px solid #222;background:#111}
+#clock{font-weight:800;font-size:30px;margin-right:14px}
+#date{opacity:.7}
+.tb-right{display:flex;gap:12px;align-items:center}
+.pill{font-size:14px;padding:6px 12px;border-radius:999px;background:#222}
+.pill.ok{background:#123f22;color:#7dffa8} .pill.bad{background:#471111;color:#ff9a9a}
+#grid{flex:1;display:grid;grid-template-columns:300px 1fr 320px;gap:14px;padding:14px;min-height:0}
+.card{background:#141417;border:1px solid #26262b;border-radius:16px;padding:16px;overflow:hidden}
+.card h2{margin:0 0 10px;font-size:15px;text-transform:uppercase;letter-spacing:.12em;opacity:.6}
+.card.center{text-align:center}
+#long-left{font-size:64px;font-weight:800;margin:6px 0}
+.short-row{display:flex;justify-content:space-between;font-size:28px;font-weight:700;margin-top:12px}
+.stat{margin:12px 0} .stat label{display:flex;justify-content:space-between;margin-bottom:6px;font-size:18px}
+.bar{height:14px;background:#242428;border-radius:999px;overflow:hidden}
+.bar.big{height:18px} .bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#2b6cff,#00d4ff);border-radius:999px;transition:width .5s}
+.sub{margin-top:10px;font-size:15px} .dim{opacity:.55} .mt{margin-top:16px}
+#todos{list-style:none;margin:0;padding:0} #todos li{padding:8px 0;border-bottom:1px solid #222;font-size:18px}
+#todos li.done{opacity:.45;text-decoration:line-through}
+/* 10" portrait / small fallback: stack */
+@media (max-width:900px){ #grid{grid-template-columns:1fr;overflow:hidden} .card{padding:12px} #long-left{font-size:48px} }
