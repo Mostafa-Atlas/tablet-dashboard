@@ -120,6 +120,7 @@ Session lasts 7 days (token in browser localStorage). No browser popup — wrong
   - Short → countdown hours/mins **or** a clock time today like `18:30` (kiosk counts down to it).
   - All timers list below with a **checkbox** to mark done, tag, and delete. Done timers show ✓ on the kiosk.
 - **Storage:** per-disk bars on the kiosk turn red past 80%. Agent sends disks every 3h.
+- **Dashboard time:** pick date + time in `/admin` to shift the kiosk clock (shows day-month-year like `12-1-2026`), or reset to real time. Only the clock display shifts — timers keep real time.
 
 ## 8. API reference
 

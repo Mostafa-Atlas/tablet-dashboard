@@ -1,14 +1,19 @@
 // Kiosk: 12h clock, SSE live updates, stale handling. Display only (no interaction).
 const $ = id => document.getElementById(id);
 
+// Dashboard clock = real time + server offset (set from /admin). 0 = real time.
+let clockOffsetSec = 0;
+function dashboardNow() { return new Date(Date.now() + clockOffsetSec * 1000); }
+
 function tickClock() {
-  const d = new Date();
+  const d = dashboardNow();
   let h = d.getHours(), m = String(d.getMinutes()).padStart(2, '0');
   const s = String(d.getSeconds()).padStart(2, '0');
   const ap = h >= 12 ? 'PM' : 'AM';
   h = h % 12 || 12;
   $('clock').textContent = `${h}:${m}:${s} ${ap}`;
-  $('date').textContent = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  // day-month-year: 12-1-2026
+  $('date').textContent = `${d.getDate()}-${d.getMonth() + 1}-${d.getFullYear()}`;
 }
 setInterval(tickClock, 1000); tickClock();
 
@@ -163,19 +168,26 @@ function renderWeather(w) {
   $('weather').textContent = `${w.temp}°C ${w.label || ''}`;
 }
 
+function renderTime(t) {
+  if (!t) return;
+  clockOffsetSec = Number(t.offsetSec) || 0;
+  tickClock();
+}
+
 async function boot() {
   try {
     const j = await (await fetch('/api/snapshot')).json();
-    renderPC(j.pc); renderTodos(j.todos); renderTimers(j.timers); renderWeather(j.weather);
+    renderPC(j.pc); renderTodos(j.todos); renderTimers(j.timers); renderWeather(j.weather); renderTime(j.time);
   } catch {}
   const es = new EventSource('/api/stream');
   es.addEventListener('snapshot', e => {
-    try { const j = JSON.parse(e.data); renderPC(j.pc); renderTodos(j.todos); renderTimers(j.timers); renderWeather(j.weather); } catch {}
+    try { const j = JSON.parse(e.data); renderPC(j.pc); renderTodos(j.todos); renderTimers(j.timers); renderWeather(j.weather); renderTime(j.time); } catch {}
   });
   es.addEventListener('pc', e => { try { renderPC(JSON.parse(e.data)); } catch {} });
   es.addEventListener('todos', e => { try { renderTodos(JSON.parse(e.data)); } catch {} });
   es.addEventListener('timers', e => { try { renderTimers(JSON.parse(e.data)); } catch {} });
   es.addEventListener('weather', e => { try { renderWeather(JSON.parse(e.data)); } catch {} });
+  es.addEventListener('time', e => { try { renderTime(JSON.parse(e.data)); } catch {} });
   setInterval(async () => {
     try { renderWeather(await (await fetch('/api/weather')).json()); } catch {}
   }, 60000);

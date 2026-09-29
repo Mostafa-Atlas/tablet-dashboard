@@ -39,6 +39,7 @@ function defaultDb() {
       uptimeSec: 0, disks: [], updatedAt: 0
     },
     weather: { temp: null, code: null, label: '—', updatedAt: 0 },
+    time: { offsetSec: 0, updatedAt: 0 }, // dashboard clock = real time + offset (set from /admin)
     users: [] // { user, salt, hash, createdAt } — created via first-boot setup page
   };
 }
@@ -54,6 +55,7 @@ function loadDb() {
 let db = loadDb();
 // migrate old db.json files that predate users[]
 if (!Array.isArray(db.users)) { db.users = []; saveDb(); }
+if (!db.time || typeof db.time.offsetSec !== 'number') { db.time = { offsetSec: 0, updatedAt: 0 }; saveDb(); }
 // migrate old single long/short timer object -> named timers array
 if (db.timers && !Array.isArray(db.timers)) {
   const arr = [];
@@ -204,7 +206,7 @@ app.get('/api/stream', (req, res) => {
 });
 
 function snapshot() {
-  return { now: Date.now(), pc: db.pc, todos: db.todos, timers: db.timers, weather: db.weather };
+  return { now: Date.now(), pc: db.pc, todos: db.todos, timers: db.timers, weather: db.weather, time: db.time };
 }
 app.get('/api/snapshot', (req, res) => res.json(snapshot()));
 
@@ -383,6 +385,27 @@ app.get('/api/weather', async (req, res) => {
 refreshWeather();
 setInterval(refreshWeather, 30 * 60 * 1000);
 
+// ---- Dashboard clock override (set from /admin) ----
+// Kiosk clock shows real time + offsetSec. Timers/countdowns always use real time.
+app.get('/api/time', (req, res) => {
+  res.json({ offsetSec: db.time.offsetSec || 0, dashboardNow: Date.now() + (db.time.offsetSec || 0) * 1000 });
+});
+app.post('/api/time', adminAuth, (req, res) => {
+  const b = req.body || {};
+  if (b.action === 'reset') {
+    db.time = { offsetSec: 0, updatedAt: Date.now() };
+  } else if (typeof b.offsetSec !== 'undefined') {
+    const off = Math.max(-86400 * 365, Math.min(86400 * 365, Number(b.offsetSec) || 0));
+    db.time = { offsetSec: Math.round(off), updatedAt: Date.now() };
+  } else if (b.datetime) {
+    // datetime-local string from admin, e.g. "2026-01-12T14:30"
+    const t = new Date(b.datetime).getTime();
+    if (!Number.isFinite(t)) return res.status(400).json({ error: 'bad datetime' });
+    db.time = { offsetSec: Math.round((t - Date.now()) / 1000), updatedAt: Date.now() };
+  } else return res.status(400).json({ error: 'datetime, offsetSec or action=reset required' });
+  saveDb(); broadcast('time', db.time);
+  res.json({ offsetSec: db.time.offsetSec, dashboardNow: Date.now() + db.time.offsetSec * 1000 });
+});
 // ---- Calendar placeholder (Google Calendar OAuth comes in v0.2) ----
 app.get('/api/calendar', (req, res) => {
   res.json({ next: null, note: 'Connect Google Calendar in v0.2 (OAuth/ICS).' });

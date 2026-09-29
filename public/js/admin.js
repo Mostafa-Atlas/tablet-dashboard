@@ -78,8 +78,7 @@ async function doLogin() {
 
 async function refresh() {
   const r = await authFetch('/api/todos');
-  if (!r.ok) return;
-  const todos = await r.json();
+  if (!r.ok) return;  const todos = await r.json();
   const ul = document.getElementById('list'); ul.innerHTML = '';
   todos.forEach(t => {
     const li = document.createElement('li');
@@ -95,6 +94,7 @@ async function refresh() {
     li.append(cb, sp, del); ul.appendChild(li);
   });
   refreshTimers();
+  refreshTime();
 }
 
 async function refreshTimers() {
@@ -154,7 +154,31 @@ document.getElementById('todo-add').onclick = async () => {
   el.value = ''; msg('Added ✓'); refresh();
 };
 
-/* ---- timers: named, multi, long (days/date) + short (duration/clock time) ---- */
+/* ---- dashboard clock override ---- */
+async function refreshTime() {
+  try {
+    const t = await (await fetch('/api/time')).json();
+    const d = new Date(t.dashboardNow);
+    let h = d.getHours(), m = String(d.getMinutes()).padStart(2, '0');
+    const ap = h >= 12 ? 'PM' : 'AM';
+    h = h % 12 || 12;
+    const off = t.offsetSec || 0;
+    const offTxt = off === 0 ? '(real time)' : `(shifted ${off > 0 ? '+' : ''}${Math.round(off / 3600 * 10) / 10}h)`;
+    document.getElementById('dash-now').textContent =
+      `${h}:${m} ${ap}  ${d.getDate()}-${d.getMonth() + 1}-${d.getFullYear()} ${offTxt}`;
+  } catch {}
+}
+document.getElementById('time-set').onclick = async () => {
+  const v = document.getElementById('tm-datetime').value;
+  if (!v) { msg('Pick a date + time first'); return; }
+  const r = await authFetch('/api/time', { method: 'POST', body: JSON.stringify({ datetime: v }) });
+  if (!r.ok) { msg((await r.json()).error || 'Failed'); return; }
+  msg('Dashboard time set ✓'); refreshTime();
+};
+document.getElementById('time-reset').onclick = async () => {
+  await authFetch('/api/time', { method: 'POST', body: JSON.stringify({ action: 'reset' }) });
+  msg('Back to real time ✓'); refreshTime();
+};
 let timerType = 'long';
 const typeLongBtn = document.getElementById('type-long');
 const typeShortBtn = document.getElementById('type-short');
