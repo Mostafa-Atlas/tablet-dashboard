@@ -5,7 +5,7 @@ const path = require('path');
 const fs = require('fs');
 
 // ---- Config ----
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 1200;
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASS = process.env.ADMIN_PASS || 'changeme123';
 // 6th of October City, Giza, Egypt

@@ -30,8 +30,8 @@ node server.js
 ```
 
 Open:
-- Display → http://localhost:8080
-- Admin → http://localhost:8080/admin (user `admin`, pass `changeme123`)
+- Display → http://localhost:1200
+- Admin → http://localhost:1200/admin (user `admin`, pass `changeme123`)
 
 You should see mock/empty stats until the agent connects (pill shows `PC OFFLINE` — normal).
 
@@ -40,7 +40,7 @@ You should see mock/empty stats until the agent connects (pill shows `PC OFFLINE
 Copy `.env.example` → `.env` and edit:
 
 ```
-PORT=8080
+PORT=1200
 ADMIN_USER=admin
 ADMIN_PASS=changeme123        # change this!
 WEATHER_LAT=29.9668           # 6th of October
@@ -56,7 +56,7 @@ Server listens on `0.0.0.0` so it works over LAN + Tailscale with no extra confi
 cd /path/to/tablet-dashboard
 docker compose up -d --build
 docker compose logs -f
-# open http://<lab-ip>:8080  (e.g. http://192.168.1.50:8080)
+# open http://<lab-ip>:1200  (e.g. http://192.168.1.50:1200)
 ```
 
 Data persists in `./data/db.json` (mounted to `/data` in container).
@@ -74,11 +74,11 @@ On your main Win11 PC:
 ```powershell
 cd "E:\Projects\Tablet dashbaord"
 pip install -r agent/requirements.txt
-$env:SERVER="http://<lab-ip>:8080"   # use home-lab LAN or Tailscale IP, NOT localhost
+$env:SERVER="http://<lab-ip>:1200"   # use home-lab LAN or Tailscale IP, NOT localhost
 python agent/agent.py
 ```
 
-Expected output: `agent -> http://<lab-ip>:8080 ...` and the tablet pill flips to `PC ONLINE`.
+Expected output: `agent -> http://<lab-ip>:1200 ...` and the tablet pill flips to `PC ONLINE`.
 
 - Posts every 2s (`INTERVAL=2` to change).
 - Disks refresh every 3h per spec.
@@ -91,14 +91,14 @@ Expected output: `agent -> http://<lab-ip>:8080 ...` and the tablet pill flips t
 2. Trigger: At log on. Action: `pythonw.exe "E:\Projects\Tablet dashbaord\agent\agent.py"`.
 3. Set env `SERVER` in the script or wrap in a `.bat`:
    ```bat
-   set SERVER=http://192.168.1.50:8080
+   set SERVER=http://192.168.1.50:1200
    pythonw "E:\Projects\Tablet dashbaord\agent\agent.py"
    ```
 
 ## 6. Tablet setup (Samsung Android)
 
 1. Install **Fully Kiosk Browser**.
-2. Start URL: `http://<lab-ip>:8080`.
+2. Start URL: `http://<lab-ip>:1200`.
 3. Enable: Fullscreen, Keep Screen On, Auto-reload on network reconnect.
 4. Optional: Screen dim 11pm–7am in Fully settings.
 
@@ -106,7 +106,7 @@ No touch needed — display is read-only. All control is from `/admin` on your p
 
 ## 7. Using /admin
 
-Open `http://<lab-ip>:8080/admin`, log in with Basic Auth (`ADMIN_USER` / `ADMIN_PASS`).
+Open `http://<lab-ip>:1200/admin`, log in with Basic Auth (`ADMIN_USER` / `ADMIN_PASS`).
 
 - **To-do:** add, check/uncheck, delete. Kiosk shows top 5 unchecked.
 - **Long timer:** enter days → Set (e.g. `12` = 12 days from now).
@@ -130,7 +130,7 @@ Open `http://<lab-ip>:8080/admin`, log in with Basic Auth (`ADMIN_USER` / `ADMIN
 
 ## 9. Troubleshooting
 
-- **PC OFFLINE on tablet:** agent not reaching server. Check `$env:SERVER` uses lab IP, not localhost. `curl http://<lab-ip>:8080/api/health` from main PC.
+- **PC OFFLINE on tablet:** agent not reaching server. Check `$env:SERVER` uses lab IP, not localhost. `curl http://<lab-ip>:1200/api/health` from main PC.
 - **401 on /admin:** browser cached wrong creds — close tab, reopen, use `ADMIN_USER`/`ADMIN_PASS` from `.env` or compose.
 - **Weather shows —:** no internet on server or Open-Meteo blocked. Server caches last value; check logs.
 - **Port in use:** change `PORT` in `.env` (e.g. `8090`).

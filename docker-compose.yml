@@ -2,9 +2,9 @@ services:
   dashboard:
     build: .
     ports:
-      - "8080:8080"
+      - "1200:1200"
     environment:
-      - PORT=8080
+      - PORT=1200
       - ADMIN_USER=admin
       - ADMIN_PASS=changeme123
       - WEATHER_LAT=29.9668

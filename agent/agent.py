@@ -3,14 +3,14 @@ Win11 PC agent -> POSTs CPU/GPU/RAM to home-lab server every 2s.
 Disks only refreshed every 3h (per spec) to save IO.
 
 Run:  pip install -r requirements.txt
-      set SERVER=http://192.168.1.50:8080  (your home-lab IP, or Tailscale IP)
+      set SERVER=http://192.168.1.50:1200  (your home-lab IP, or Tailscale IP)
       python agent.py
 Tip: run on startup via Task Scheduler.
 """
 import os, time, shutil, socket
 import urllib.request, urllib.error, json
 
-SERVER = os.environ.get("SERVER", "http://localhost:8080").rstrip("/")
+SERVER = os.environ.get("SERVER", "http://localhost:1200").rstrip("/")
 INTERVAL = float(os.environ.get("INTERVAL", "2"))
 DISK_EVERY_SEC = 3 * 3600
 
