@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 
@@ -63,22 +64,66 @@ function broadcast(type, data) {
   }
 }
 
-// ---- Basic auth for /admin + mutating APIs ----
+// ---- Token auth for /admin APIs (custom login page, no browser popup) ----
+const sessions = new Map(); // token -> expiresAt (ms)
+const SESSION_TTL = 7 * 24 * 3600 * 1000;
+
+function issueToken() {
+  const token = crypto.randomBytes(32).toString('hex');
+  sessions.set(token, Date.now() + SESSION_TTL);
+  return token;
+}
+function validToken(token) {
+  if (!token) return false;
+  const exp = sessions.get(token);
+  if (!exp) return false;
+  if (exp < Date.now()) { sessions.delete(token); return false; }
+  return true;
+}
+// Accepts: Authorization: Bearer <token>  (login page)
+// Fallback: Basic user:pass (scripts / curl). Never sends WWW-Authenticate
+// so browsers won't show the native popup.
 function adminAuth(req, res, next) {
   const h = req.headers.authorization || '';
-  const [scheme, encoded] = h.split(' ');
-  if (scheme === 'Basic' && encoded) {
-    const [u, p] = Buffer.from(encoded, 'base64').toString().split(':');
-    if (u === ADMIN_USER && p === ADMIN_PASS) return next();
+  const [scheme, cred] = h.split(' ');
+  if (scheme === 'Bearer' && validToken(cred)) return next();
+  if (scheme === 'Basic' && cred) {
+    const idx = Buffer.from(cred, 'base64').toString().indexOf(':');
+    if (idx >= 0) {
+      const u = Buffer.from(cred, 'base64').toString().slice(0, idx);
+      const p = Buffer.from(cred, 'base64').toString().slice(idx + 1);
+      if (u === ADMIN_USER && p === ADMIN_PASS) return next();
+    }
   }
-  res.set('WWW-Authenticate', 'Basic realm="tablet-admin"');
-  return res.status(401).send('Auth required');
+  return res.status(401).json({ error: 'Login required' });
 }
 
 // ---- Static ----
 app.use(express.static(path.join(__dirname, 'public')));
-app.get('/admin', adminAuth, (req, res) => {
+app.get('/admin', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
+
+// ---- Login / logout / me ----
+app.post('/api/login', (req, res) => {
+  const { user, pass } = req.body || {};
+  if (user === ADMIN_USER && pass === ADMIN_PASS) {
+    const token = issueToken();
+    return res.json({ ok: true, token, expiresInSec: Math.round(SESSION_TTL / 1000) });
+  }
+  // tiny delay to slow brute force
+  setTimeout(() => res.status(401).json({ error: 'Wrong username or password' }), 400);
+});
+app.post('/api/logout', (req, res) => {
+  const h = req.headers.authorization || '';
+  const token = h.startsWith('Bearer ') ? h.slice(7) : null;
+  if (token) sessions.delete(token);
+  res.json({ ok: true });
+});
+app.get('/api/me', (req, res) => {
+  const h = req.headers.authorization || '';
+  const token = h.startsWith('Bearer ') ? h.slice(7) : null;
+  res.json({ loggedIn: validToken(token) });
 });
 
 // ---- Health ----

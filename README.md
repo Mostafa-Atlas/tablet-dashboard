@@ -106,7 +106,8 @@ No touch needed — display is read-only. All control is from `/admin` on your p
 
 ## 7. Using /admin
 
-Open `http://<lab-ip>:1200/admin`, log in with Basic Auth (`ADMIN_USER` / `ADMIN_PASS`).
+Open `http://<lab-ip>:1200/admin` and sign in on the custom login page (`ADMIN_USER` / `ADMIN_PASS`).
+Session lasts 7 days (token in browser localStorage). No browser popup — wrong creds show an inline error.
 
 - **To-do:** add, check/uncheck, delete. Kiosk shows top 5 unchecked.
 - **Long timer:** enter days → Set (e.g. `12` = 12 days from now).
@@ -121,17 +122,19 @@ Open `http://<lab-ip>:1200/admin`, log in with Basic Auth (`ADMIN_USER` / `ADMIN
 | GET | `/api/stream` | no | SSE: `snapshot, pc, todos, timers, weather` |
 | GET/POST | `/api/pc` | no (POST open for LAN agent) | agent POSTs `{ cpu, ram, gpu, disks }` |
 | GET | `/api/todos` | no | list |
-| POST/PATCH/DELETE | `/api/todos…` | admin | mutate |
+| POST/PATCH/DELETE | `/api/todos…` | admin token (Bearer) | mutate |
 | GET | `/api/timers` | no | `{ long, short }` |
-| POST | `/api/timers/long` | admin | `{ days }` or `{ targetAt }` |
-| POST | `/api/timers/short` | admin | `{ action: start\|pause\|resume\|reset, hours, mins }` |
+| POST | `/api/timers/long` | admin token (Bearer) | `{ days }` or `{ targetAt }` |
+| POST | `/api/timers/short` | admin token (Bearer) | `{ action: start\|pause\|resume\|reset, hours, mins }` |
+| POST | `/api/login` | no | `{ user, pass }` → `{ token }` |
+| GET | `/api/me` | no | `{ loggedIn }` |
 | GET | `/api/weather` | no | cached Open-Meteo |
 | GET | `/api/calendar` | no | placeholder, real OAuth in v0.2 |
 
 ## 9. Troubleshooting
 
 - **PC OFFLINE on tablet:** agent not reaching server. Check `$env:SERVER` uses lab IP, not localhost. `curl http://<lab-ip>:1200/api/health` from main PC.
-- **401 on /admin:** browser cached wrong creds — close tab, reopen, use `ADMIN_USER`/`ADMIN_PASS` from `.env` or compose.
+- **Can't log in on /admin:** use `ADMIN_USER`/`ADMIN_PASS` from `.env` or compose. Hit Log out to clear a stale token. Scripts can still use HTTP Basic on the API.
 - **Weather shows —:** no internet on server or Open-Meteo blocked. Server caches last value; check logs.
 - **Port in use:** change `PORT` in `.env` (e.g. `8090`).
 - **Push rejected:** repo is private — `git pull --rebase` then push, or use a PAT with `repo` scope.

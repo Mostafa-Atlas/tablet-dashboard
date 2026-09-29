@@ -1,41 +1,108 @@
-const msg = t => document.getElementById('msg').textContent = t;
+// Admin with custom login page (token in localStorage, no browser Basic popup).
+const msg = t => document.getElementById('msg').textContent = t || '';
+const loginErr = t => document.getElementById('login-err').textContent = t || '';
+const getToken = () => localStorage.getItem('admin_token');
+
+async function authFetch(url, opts = {}) {
+  const headers = { ...(opts.headers || {}) };
+  const token = getToken();
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  if (opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+  const r = await fetch(url, { ...opts, headers });
+  if (r.status === 401) { showLogin('Session expired — sign in again'); }
+  return r;
+}
+
+function showLogin(err) {
+  document.getElementById('login-card').style.display = 'block';
+  document.getElementById('panel').style.display = 'none';
+  if (err) loginErr(err);
+}
+function showPanel() {
+  document.getElementById('login-card').style.display = 'none';
+  document.getElementById('panel').style.display = 'block';
+  refresh();
+}
+
+async function doLogin() {
+  loginErr('');
+  const user = document.getElementById('login-user').value.trim();
+  const pass = document.getElementById('login-pass').value;
+  if (!user || !pass) { loginErr('Enter username and password'); return; }
+  const btn = document.getElementById('login-btn');
+  btn.disabled = true; btn.textContent = 'Signing in…';
+  try {
+    const r = await fetch('/api/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user, pass })
+    });
+    const j = await r.json();
+    if (!r.ok) { loginErr(j.error || 'Login failed'); return; }
+    localStorage.setItem('admin_token', j.token);
+    document.getElementById('login-pass').value = '';
+    showPanel();
+  } catch { loginErr('Cannot reach server'); }
+  finally { btn.disabled = false; btn.textContent = 'Sign in'; }
+}
+
 async function refresh() {
-  const todos = await (await fetch('/api/todos')).json();
+  const r = await authFetch('/api/todos');
+  if (!r.ok) return;
+  const todos = await r.json();
   const ul = document.getElementById('list'); ul.innerHTML = '';
   todos.forEach(t => {
     const li = document.createElement('li');
     const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!t.done;
     cb.onchange = async () => {
-      await fetch('/api/todos/' + t.id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done: cb.checked }) });
+      await authFetch('/api/todos/' + t.id, { method: 'PATCH', body: JSON.stringify({ done: cb.checked }) });
       refresh();
     };
     const sp = document.createElement('span'); sp.textContent = t.text; sp.style.flex = '1';
-    const del = document.createElement('button'); del.textContent = '✕';
-    del.onclick = async () => { await fetch('/api/todos/' + t.id, { method: 'DELETE' }); refresh(); };
+    const del = document.createElement('button'); del.textContent = '✕'; del.className = 'ghost';
+    del.onclick = async () => { await authFetch('/api/todos/' + t.id, { method: 'DELETE' }); refresh(); };
     li.append(cb, sp, del); ul.appendChild(li);
   });
 }
+
+document.getElementById('login-btn').onclick = doLogin;
+document.getElementById('login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+document.getElementById('logout-btn').onclick = async () => {
+  try { await authFetch('/api/logout', { method: 'POST' }); } catch {}
+  localStorage.removeItem('admin_token');
+  showLogin();
+};
+
 document.getElementById('todo-add').onclick = async () => {
   const el = document.getElementById('todo-text');
   if (!el.value.trim()) return;
-  const r = await fetch('/api/todos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: el.value }) });
-  if (!r.ok) { msg('Auth failed? Reload and login as admin.'); return; }
+  const r = await authFetch('/api/todos', { method: 'POST', body: JSON.stringify({ text: el.value }) });
+  if (!r.ok) { msg('Failed — are you logged in?'); return; }
   el.value = ''; msg('Added ✓'); refresh();
 };
 document.getElementById('long-set').onclick = async () => {
   const days = Number(document.getElementById('long-days').value || 0);
-  await fetch('/api/timers/long', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days }) });
+  await authFetch('/api/timers/long', { method: 'POST', body: JSON.stringify({ days }) });
   msg('Long timer set ✓');
 };
 document.getElementById('sh-start').onclick = async () => {
-  await fetch('/api/timers/short', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+  await authFetch('/api/timers/short', { method: 'POST',
     body: JSON.stringify({ action: 'start', hours: Number(document.getElementById('sh-h').value || 0), mins: Number(document.getElementById('sh-m').value || 0) }) });
   msg('Short timer started ✓');
 };
 for (const [id, action] of [['sh-pause', 'pause'], ['sh-resume', 'resume'], ['sh-reset', 'reset']]) {
   document.getElementById(id).onclick = async () => {
-    await fetch('/api/timers/short', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) });
+    await authFetch('/api/timers/short', { method: 'POST', body: JSON.stringify({ action }) });
     msg('Short timer: ' + action + ' ✓');
   };
 }
-refresh();
+
+// Boot: if token still valid, skip login.
+(async () => {
+  const token = getToken();
+  if (!token) return showLogin();
+  try {
+    const r = await fetch('/api/me', { headers: { 'Authorization': 'Bearer ' + token } });
+    const j = await r.json();
+    if (j.loggedIn) showPanel(); else showLogin();
+  } catch { showLogin('Cannot reach server'); }
+})();
