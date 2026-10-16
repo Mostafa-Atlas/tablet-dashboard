@@ -212,7 +212,7 @@ def post_media():
     payload = {"playing": snap["playing"], "title": snap.get("title") or "",
                "artist": snap.get("artist") or "", "album": snap.get("album") or "",
                "app": snap.get("app") or ""}
-    if (key != _media_state["key"] or time.time() - _media_state["thumb_at"] > 300) and snap.get("thumb"):
+    if (key != _media_state["key"] or time.time() - _media_state["thumb_at"] > 60) and snap.get("thumb"):
         payload["thumb"] = snap["thumb"]
         _media_state["thumb_at"] = time.time()
     _media_state["key"] = key
