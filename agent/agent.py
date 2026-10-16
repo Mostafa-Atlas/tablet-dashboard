@@ -182,8 +182,9 @@ def media_snapshot():
                     stream = await ref.open_read_async()
                     if stream.size and stream.size < 160 * 1024:
                         buf = _Buf(stream.size)
-                        n = await stream.read_async(buf, buf.capacity, _ISO.READ_AHEAD)
-                        raw = bytes(bytearray(buf)[:n])
+                        await stream.read_async(buf, buf.capacity, _ISO.READ_AHEAD)
+                        n = buf.length
+                        raw = bytes(bytearray(buf)[:n]) if n else b""
                         if raw:
                             try:
                                 ctype = stream.content_type or "image/jpeg"
