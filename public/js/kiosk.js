@@ -12,8 +12,7 @@ function tickClock() {
   const ap = h >= 12 ? 'PM' : 'AM';
   h = h % 12 || 12;
   $('clock').textContent = `${h}:${m}:${s} ${ap}`;
-  // day-month-year: 12-1-2026
-  $('date').textContent = `${d.getDate()}-${d.getMonth() + 1}-${d.getFullYear()}`;
+  $('date').textContent = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 }
 setInterval(tickClock, 1000); tickClock();
 
@@ -323,6 +322,8 @@ function renderEvent(cal) {
   el.appendChild(rail);
   renderNext();
 }
+let nextDismissedAt = 0, nextDismissedKey = '';
+$('next-close').onclick = () => { nextDismissedAt = Date.now(); $('next-card').hidden = true; };
 function renderNext() {
   const now = Date.now();
   const future = [];
@@ -332,6 +333,9 @@ function renderNext() {
     .forEach(e => future.push({ at: e.startMs, name: e.summary, kind: 'Calendar' }));
   future.sort((a, b) => a.at - b.at || Number(b.priority === 'high') - Number(a.priority === 'high'));
   const next = future[0];
+  const key = next ? `${next.kind}:${next.name}:${next.at}` : '';
+  if (key !== nextDismissedKey) { nextDismissedKey = key; nextDismissedAt = 0; }
+  if (nextDismissedAt && now - nextDismissedAt < 3600000) { $('next-card').hidden = true; return; }
   $('next-card').hidden = !next || next.at - now > 7 * 86400000;
   if ($('next-card').hidden) return;
   const at = new Date(next.at), today = new Date();
