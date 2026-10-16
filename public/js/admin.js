@@ -627,11 +627,13 @@ async function refreshDisplay() {
       ['quiet-enabled', 'quietEnabled']]) byId(id).checked = !!prefs[key];
     byId('quiet-start').value = prefs.quietStart || '23:00';
     byId('quiet-end').value = prefs.quietEnd || '07:00';
+    byId('empty-msg').value = prefs.emptyMsg || '';
   } catch { msg('Could not load display settings'); }
 }
 byId('display-save').onclick = async () => {
   const body = { mode: byId('display-mode').value, textSize: byId('display-text').value,
-    quietStart: byId('quiet-start').value, quietEnd: byId('quiet-end').value };
+    quietStart: byId('quiet-start').value, quietEnd: byId('quiet-end').value,
+    emptyMsg: byId('empty-msg').value };
   for (const [id, key] of [['show-calendar', 'showCalendar'], ['show-todos', 'showTodos'],
     ['show-timers', 'showTimers'], ['show-pc', 'showPC'], ['display-privacy', 'privacy'],
     ['quiet-enabled', 'quietEnabled']]) body[key] = byId(id).checked;

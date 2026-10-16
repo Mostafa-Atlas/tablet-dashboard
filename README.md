@@ -18,7 +18,7 @@ node server.js
 Open `http://localhost:1200/admin` and create an admin account. Open `http://localhost:1200/` for the display. Use `http://<server-LAN-or-Tailscale-IP>:1200/` on the tablet. The first display shows sample tasks and a timer until you replace them in admin.
 
 The server listens on `0.0.0.0`; allow port 1200 only on the network you intend to use. Change `PORT` in `.env` if needed. Weather defaults to 6th of October City, Giza; change `WEATHER_LAT` and `WEATHER_LON` in `.env` for another location.
-Weather uses Open-Meteo's current conditions and today's high, low, and peak hourly chance of rain. It refreshes every 30 minutes and shows local SVG icons that change between day and night. The tablet links to Open-Meteo for data attribution. The free API is intended for non-commercial use.
+Weather uses Open-Meteo's current conditions and today's high, low, and peak hourly chance of rain. It refreshes every 30 minutes and shows local SVG icons that change between day and night. Weather data by Open-Meteo. The free API is intended for non-commercial use.
 
 ## Run with Docker on the home lab
 
@@ -53,7 +53,7 @@ Use Fully Kiosk Browser or Chrome. Set the start URL to `http://<lab-ip>:1200/` 
 
 - **Overview** shows today, timers, and PC stats. **Focus** shows today and timers. The **Up next** strip highlights the nearest upcoming event or due task within seven days. Empty timer cards disappear, and offline PC stats collapse so the remaining cards get more room.
 - Portrait and narrow widths use a single column; landscape uses two or three columns based on available width.
-- In `/admin` → **Tablet display**, choose text size, visible sections, calendar privacy, and quiet hours. Quiet hours dim the page on the tablet according to the tablet's local time.
+- In `/admin` → **Tablet display**, choose text size, visible sections, calendar privacy, quiet hours, and the empty to-do message. Quiet hours dim the page on the tablet according to the tablet's local time.
 - **DASHBOARD LIVE** reports the server stream. **RECONNECTING** means the display is waiting for it. **PC ONLINE/OFFLINE** separately reports agent freshness.
 - Alarm sound is on by default: the tablet tries to play it when a task is due or a timer finishes. Keep the tablet's media volume up. If the browser blocks automatic playback, **Enable sound** appears inside the alarm. Snooze for **5**, **10**, or **30** minutes, or dismiss the alarm on that tablet.
 

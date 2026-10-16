@@ -86,6 +86,11 @@
   details.howto summary{cursor:pointer;color:#8ab4ff}
   details.howto ol{margin:8px 0;padding-left:20px}
   .ok-dot{color:var(--good)} .bad-dot{color:var(--bad)}
+  #login-card label,#setup-card label{display:block;text-align:left;font-size:13px;color:var(--dim);margin:8px 0 0}
+  .toc{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px}
+  .toc a{font-size:13px;color:#bcd2ff;text-decoration:none;border:1px solid var(--line);border-radius:99px;padding:8px 14px;background:#141419;min-height:44px;display:inline-flex;align-items:center}
+  .toc a:hover,.toc a:focus-visible{border-color:var(--accent)}
+  section.card{scroll-margin-top:84px}
   .visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 </style>
 </head>
@@ -126,9 +131,12 @@
     <button id="logout-btn" class="ghost">Log out</button>
   </div>
   <div class="shell">
+    <nav class="toc" aria-label="Sections">
+      <a href="#sec-todos">Tasks</a><a href="#sec-note">Note</a><a href="#sec-routines">Routines</a><a href="#sec-timers">Timers</a><a href="#sec-sound">Sound</a><a href="#sec-time">Time</a><a href="#sec-cal">Calendar</a><a href="#sec-display">Display</a><a href="#sec-data">Backup</a>
+    </nav>
     <div class="grid">
 
-      <section class="card" data-column="left">
+      <section class="card" data-column="left" id="sec-todos">
         <h2>To-Do</h2>
         <p class="hint">Due tasks join the Today timeline. Set a priority and optional reminder time.</p>
         <div class="row"><div class="field"><label for="todo-text">New task</label><input id="todo-text" placeholder="What needs doing?" /></div>
@@ -142,14 +150,14 @@
         <ul class="items" id="list"></ul>
       </section>
 
-      <section class="card" data-column="right">
+      <section class="card" data-column="right" id="sec-note">
         <h2>Pinned note</h2>
         <p class="hint">Save a short note from this page on your phone or PC. It appears on the tablet right away.</p>
         <label for="note-text">Note</label><textarea id="note-text" maxlength="1000" rows="5" placeholder="A reminder, shopping list, or message"></textarea>
         <div class="row"><button id="note-save">Save note</button><button id="note-clear" class="ghost">Clear</button></div>
       </section>
 
-      <section class="card" data-column="right">
+      <section class="card" data-column="right" id="sec-routines">
         <h2>Routine checklists</h2>
         <p class="hint">Check off steps here. Daily and weekly routines reset automatically.</p>
         <div class="row"><div class="field"><label for="routine-name">New routine</label><input id="routine-name" placeholder="Morning routine" /></div>
@@ -158,7 +166,7 @@
         <div id="routine-list"></div>
       </section>
 
-      <section class="card" data-column="left">
+      <section class="card" data-column="left" id="sec-timers">
         <h2>New timer</h2>
         <p class="hint">Every timer has a name — long counts days, short counts today</p>
         <div class="row"><div class="field"><label for="tm-name">Timer name</label><input id="tm-name" placeholder="E.g. Exams or Gym" /></div>
@@ -183,20 +191,20 @@
         </div>
       </section>
 
-      <section class="card" data-column="left">
+      <section class="card" data-column="right">
         <h2>All timers</h2>
         <p class="hint">Pause, resume, rename, recolor, or mark a timer done.</p>
         <ul class="items" id="timer-list"></ul>
       </section>
 
-      <section class="card" data-column="right">
+      <section class="card" data-column="right" id="sec-sound">
         <h2>Alarm sound</h2>
         <p class="hint">The tablet tries to play alarms automatically when a timer finishes or a task reaches its due time. If its browser blocks sound, Enable sound appears inside that alarm.</p>
         <p class="hint">For your own sound, place an MP3 named <code>alarm.mp3</code> in <code>public/audio/</code> on the server. The built-in chime plays until that file exists. This test plays on the device viewing admin; test the tablet separately.</p>
         <div class="row"><button id="alarm-test">Test sound on this device</button></div>
       </section>
 
-      <section class="card" data-column="right">
+      <section class="card" data-column="right" id="sec-time">
         <h2>Dashboard time</h2>
         <p class="hint">Shifts only the kiosk clock — timers keep real time</p>
         <div class="now-line">Now showing: <b id="dash-now">—</b></div>
@@ -204,7 +212,7 @@
         <div class="row"><button id="time-reset" class="ghost">Reset to real time</button></div>
       </section>
 
-      <section class="card" data-column="right">
+      <section class="card" data-column="right" id="sec-cal">
         <h2>Google Calendar</h2>
         <p class="hint">Tablet shows your next event · <span id="cal-status"><span class="bad-dot">●</span> not connected</span></p>
         <div class="row"><div class="field"><label for="cal-ics">Private ICS / iCal URL</label><input id="cal-ics" type="url" placeholder="https://…" /></div><button id="cal-save">Connect</button></div>
@@ -220,7 +228,7 @@
         </details>
       </section>
 
-      <section class="card" data-column="right">
+      <section class="card" data-column="right" id="sec-display">
         <h2>Tablet display</h2>
         <p class="hint">Preview changes on the tablet as soon as you save.</p>
         <div class="row"><div class="field"><label for="display-mode">Layout</label><select id="display-mode"><option value="overview">Overview</option><option value="focus">Focus on today and timers</option></select></div>
@@ -233,10 +241,11 @@
         <div class="check-row"><input id="quiet-enabled" type="checkbox" /><label for="quiet-enabled">Dim during quiet hours</label></div>
         <div class="row"><div class="field"><label for="quiet-start">Dim from</label><input id="quiet-start" type="time" value="23:00" /></div>
           <div class="field"><label for="quiet-end">Until</label><input id="quiet-end" type="time" value="07:00" /></div></div>
+        <div class="row"><div class="field"><label for="empty-msg">Empty to-do message</label><input id="empty-msg" type="text" maxlength="120" placeholder="You have nothing to do now, sir" /></div></div>
         <button id="display-save">Save display settings</button>
       </section>
 
-      <section class="card" data-column="right">
+      <section class="card" data-column="right" id="sec-data">
         <h2>Data and agent</h2>
         <p class="hint">Export includes tasks, timers, note, routines, and display settings. Import replaces those items and keeps your account and calendar connection.</p>
         <div class="row"><button id="export-btn">Export JSON</button><button id="import-btn" class="ghost">Import JSON</button><input id="import-file" type="file" accept="application/json,.json" class="visually-hidden" aria-label="Choose dashboard export to import" /></div>

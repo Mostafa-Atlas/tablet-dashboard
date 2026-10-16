@@ -97,7 +97,12 @@ function renderTodos(list) {
     return (rank[a.priority] ?? 1) - (rank[b.priority] ?? 1) || (a.dueAt || Infinity) - (b.dueAt || Infinity);
   }).slice(0, 5);
   const done = (list || []).filter(t => t.done).length;
-  if (!vis.length) ul.innerHTML = '<li class="empty-msg dim">No other tasks</li>';
+  if (!vis.length) {
+    const empty = document.createElement('li');
+    empty.className = 'empty-msg dim';
+    empty.textContent = display.emptyMsg || 'You have nothing to do now, sir';
+    ul.appendChild(empty);
+  }
   vis.forEach(t => {
     const li = document.createElement('li');
     li.innerHTML = `<span class="chk"></span><span></span>`;

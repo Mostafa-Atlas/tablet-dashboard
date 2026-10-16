@@ -23,10 +23,12 @@ const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const BACKUP_FILE = path.join(DATA_DIR, 'db.json.bak');
+const DEFAULT_EMPTY_MSG = 'You have nothing to do now, sir';
 const DEFAULT_DISPLAY = {
   mode: 'overview', textSize: 'normal', privacy: false,
   showPC: true, showTimers: true, showTodos: true, showCalendar: true,
-  quietEnabled: false, quietStart: '23:00', quietEnd: '07:00'
+  quietEnabled: false, quietStart: '23:00', quietEnd: '07:00',
+  emptyMsg: DEFAULT_EMPTY_MSG
 };
 
 function defaultDb() {
@@ -507,6 +509,10 @@ function cleanDisplay(input) {
   }
   for (const key of ['quietStart', 'quietEnd']) {
     if (typeof input[key] === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(input[key])) next[key] = input[key];
+  }
+  if (typeof input.emptyMsg === 'string') {
+    const t = input.emptyMsg.trim().slice(0, 120);
+    next.emptyMsg = t || DEFAULT_EMPTY_MSG;
   }
   if (!next.showPC && !next.showTimers && !next.showTodos && !next.showCalendar) next.showTodos = true;
   return next;
