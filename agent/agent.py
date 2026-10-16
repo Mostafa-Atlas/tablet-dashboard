@@ -3,10 +3,11 @@ Win11 PC agent -> POSTs CPU/GPU/RAM to home-lab server every 2s.
 Disks only refreshed every 3h (per spec) to save IO.
 
 Run:  pip install -r requirements.txt
-      copy .env.example .env   (then edit SERVER + AGENT_TOKEN inside)
+      copy .env.example .env   (then edit SERVER inside)
       python agent.py
 Tip: run on startup via Task Scheduler.
 Env can also come from real environment variables; those override .env.
+Only 192.168.50.2 may POST stats (server checks the sender IP, no token).
 """
 import os, time, shutil, socket
 import urllib.request, urllib.error, json
@@ -33,7 +34,6 @@ def _load_dotenv():
 _load_dotenv()
 
 SERVER = os.environ.get("SERVER", "http://localhost:1200").rstrip("/")
-AGENT_TOKEN = os.environ.get("AGENT_TOKEN", "")
 INTERVAL = float(os.environ.get("INTERVAL", "2"))
 DISK_EVERY_SEC = 3 * 3600
 
@@ -84,7 +84,7 @@ def disks_cached(cache, last):
 def post(payload):
     data = json.dumps(payload).encode()
     req = urllib.request.Request(SERVER + "/api/pc", data=data, headers={
-        "Content-Type": "application/json", "Authorization": "Bearer " + AGENT_TOKEN
+        "Content-Type": "application/json"
     })
     try:
         with urllib.request.urlopen(req, timeout=5) as r:

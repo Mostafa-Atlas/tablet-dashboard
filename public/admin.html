@@ -249,9 +249,7 @@
         <h2>Data and agent</h2>
         <p class="hint">Export includes tasks, timers, note, routines, and display settings. Import replaces those items and keeps your account and calendar connection.</p>
         <div class="row"><button id="export-btn">Export JSON</button><button id="import-btn" class="ghost">Import JSON</button><input id="import-file" type="file" accept="application/json,.json" class="visually-hidden" aria-label="Choose dashboard export to import" /></div>
-        <div class="field"><label for="agent-token">PC agent token</label><input id="agent-token" type="password" readonly autocomplete="off" /></div>
-        <div class="row"><button id="agent-token-toggle" class="ghost" aria-pressed="false">Show token</button></div>
-        <p class="hint">Set <code>AGENT_TOKEN</code> to this value on the Windows PC running the agent.</p>
+        <p class="hint">Only 192.168.50.2 may send PC stats — no token needed.</p>
       </section>
 
     </div>

@@ -32,20 +32,20 @@ Open `http://<lab-ip>:1200/admin` for first-time setup. The Compose volume maps 
 
 ## Connect the Windows PC agent
 
-Requirements: Python 3.11+ and the dependencies in `agent/requirements.txt`. In `/admin`, open **Data and agent**, select **Show token**, and copy the PC agent token. This token is required for PC statistics updates.
+Requirements: Python 3.11+ and the dependencies in `agent/requirements.txt`. No token needed — the server only accepts PC stats from 192.168.50.2.
 
 ```powershell
 cd "E:\Projects\Tablet dashbaord"
 pip install -r agent/requirements.txt
-Copy-Item agent/.env.example agent/.env   # then edit SERVER + AGENT_TOKEN inside
+Copy-Item agent/.env.example agent/.env   # then edit SERVER inside
 python agent/agent.py
 ```
 
-`agent/.env` holds `SERVER=http://<lab-ip>:1200` (or the server's Tailscale IP) and `AGENT_TOKEN=<token-from-admin>`. Real environment variables still work and override `.env`. Never commit `agent/.env`.
+`agent/.env` holds `SERVER=http://<lab-ip>:1200` (or the server's Tailscale IP). Real environment variables still work and override `.env`. Never commit `agent/.env`.
 
 The agent posts CPU, GPU, and RAM about every 2 seconds and refreshes disk information every 3 hours. If no supported GPU reading is available, the kiosk shows `—` rather than `0%`. The tablet shows **PC OFFLINE** when updates are more than 10 seconds old, even if the agent stops without disconnecting cleanly.
 
-For Task Scheduler, run the agent at logon with both `SERVER` and `AGENT_TOKEN` in its environment. Keep the token out of shared scripts and source control. The agent only makes outbound requests from the PC.
+For Task Scheduler, run the agent at logon with `SERVER` in its environment. Give the laptop a DHCP reservation so it keeps 192.168.50.2. The agent only makes outbound requests from the PC. Note: run the server directly with `node server.js` — behind Docker's NAT the server sees the Docker gateway IP instead of the laptop's, so the allowlist will not match.
 
 ## Set up the 10-inch tablet
 
@@ -88,7 +88,7 @@ npm test
 
 The integration test uses a temporary data directory; it checks agent authentication, tasks, timers, privacy, import/export, and backup recovery. It does not contact your running server.
 
-- **PC OFFLINE:** check that `SERVER` points to the lab or Tailscale address and `AGENT_TOKEN` matches `/admin`. Check `http://<lab-ip>:1200/api/health` from the PC.
+- **PC OFFLINE:** check that `SERVER` points to the lab or Tailscale address and the laptop's IP is still 192.168.50.2. Check `http://<lab-ip>:1200/api/health` from the PC.
 - **RECONNECTING:** check that the tablet can reach the server. The page reconnects automatically when the network returns.
 - **Weather unavailable or stale:** the server could not reach Open-Meteo. Check connectivity and server logs.
 - **Cannot sign in:** use the account created on first boot. There is no default password. Restore a known-good `data/` backup if credentials are lost; deleting `db.json` resets all dashboard data and is a last resort.
@@ -100,10 +100,10 @@ The integration test uses a temporary data directory; it checks agent authentica
 |---|---|---|
 | `GET /api/snapshot`, `/api/stream` | Display clients | Initial state and live updates |
 | `GET /api/health` | Display clients | Server and PC freshness |
-| `POST /api/pc` | Agent bearer token | Windows PC stats |
+| `POST /api/pc` | 192.168.50.2 only | Windows PC stats |
 | `GET /api/todos`, `/api/timers`, `/api/calendar`, `/api/display` | Display clients | Read-only dashboard data |
 | `POST/PATCH/DELETE /api/todos`, `/api/timers` | Admin bearer token | Edit tasks and timers |
 | `POST /api/display`, `/api/settings`, `/api/time` | Admin bearer token | Display, calendar, and clock settings |
-| `GET /api/export`, `POST /api/import`, `GET /api/agent-token` | Admin bearer token | Backup and agent setup |
+| `GET /api/export`, `POST /api/import` | Admin bearer token | Backup and restore |
 
 Browser requests stay on the same origin; cross-origin API access is not enabled. Keep the server reachable only from devices you trust.

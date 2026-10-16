@@ -193,7 +193,6 @@ async function refresh() {
   refreshTime();
   refreshCal();
   refreshDisplay();
-  refreshAgentToken();
   refreshNote();
   refreshRoutines();
 }
@@ -640,18 +639,6 @@ byId('display-save').onclick = async () => {
   const result = await authFetch('/api/display', { method: 'POST', body: JSON.stringify(body) });
   if (!result.ok) return msg('Could not save display settings');
   msg('Display settings saved'); refreshDisplay();
-};
-async function refreshAgentToken() {
-  try {
-    const result = await authFetch('/api/agent-token');
-    if (result.ok) byId('agent-token').value = (await result.json()).token;
-  } catch { msg('Could not load agent token'); }
-}
-byId('agent-token-toggle').onclick = () => {
-  const shown = byId('agent-token').type === 'password';
-  byId('agent-token').type = shown ? 'text' : 'password';
-  byId('agent-token-toggle').textContent = shown ? 'Hide token' : 'Show token';
-  byId('agent-token-toggle').setAttribute('aria-pressed', String(shown));
 };
 byId('export-btn').onclick = async () => {
   const result = await authFetch('/api/export');

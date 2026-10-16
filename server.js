@@ -14,6 +14,8 @@ const ENV_ADMIN_PASS = process.env.ADMIN_PASS || null;
 // 6th of October City, Giza, Egypt
 const WEATHER_LAT = process.env.WEATHER_LAT || '29.9668';
 const WEATHER_LON = process.env.WEATHER_LON || '30.9333';
+// Only this LAN IP may POST PC stats (no token). Override for tests via env.
+const PC_ALLOW_IP = process.env.PC_ALLOW_IP || '192.168.50.2';
 
 const app = express();
 app.use(express.json({ limit: '256kb' }));
@@ -50,7 +52,6 @@ function defaultDb() {
     settings: { icsUrl: '' }, // Google Calendar private ICS URL (set from /admin)
     calendar: { next: null, upcoming: [], updatedAt: 0, error: null, configured: false },
     users: [], // { user, salt, hash, createdAt } — created via first-boot setup page
-    agentToken: crypto.randomBytes(32).toString('hex'),
     display: { ...DEFAULT_DISPLAY },
     note: { text: '', updatedAt: 0 },
     routines: []
@@ -90,7 +91,7 @@ if (!db.time || typeof db.time.offsetSec !== 'number') { db.time = { offsetSec: 
 if (!db.settings || typeof db.settings.icsUrl !== 'string') { db.settings = { icsUrl: '' }; saveDb(); }
 if (!db.calendar || typeof db.calendar !== 'object') { db.calendar = { next: null, upcoming: [], updatedAt: 0, error: null, configured: false }; saveDb(); }
 if (!Array.isArray(db.calendar.upcoming)) { db.calendar.upcoming = []; saveDb(); }
-if (!db.agentToken) { db.agentToken = crypto.randomBytes(32).toString('hex'); saveDb(); }
+if ('agentToken' in db) { delete db.agentToken; saveDb(); }
 if (!db.display) { db.display = { ...DEFAULT_DISPLAY }; saveDb(); }
 if (!db.note || typeof db.note.text !== 'string') { db.note = { text: '', updatedAt: 0 }; saveDb(); }
 if (!Array.isArray(db.routines)) { db.routines = []; saveDb(); }
@@ -268,9 +269,13 @@ function snapshot() {
 }
 app.get('/api/snapshot', (req, res) => res.json(snapshot()));
 
-// ---- PC stats: agent POSTs here every ~2s ----
+// ---- PC stats: agent POSTs here every ~2s (LAN IP allowlist, no token) ----
+function clientIp(req) {
+  const raw = req.ip || req.socket?.remoteAddress || '';
+  return raw.startsWith('::ffff:') ? raw.slice(7) : raw;
+}
 app.post('/api/pc', (req, res) => {
-  if (req.get('Authorization') !== `Bearer ${db.agentToken}`) return res.status(401).json({ error: 'Agent token required' });
+  if (clientIp(req) !== PC_ALLOW_IP) return res.status(403).json({ error: 'PC not allowed' });
   const b = req.body || {};
   db.pc = {
     cpu: num(b.cpu, 0),
@@ -523,7 +528,6 @@ app.post('/api/display', adminAuth, (req, res) => {
   saveDb(); broadcast('display', db.display); broadcast('calendar', publicCalendar());
   res.json(db.display);
 });
-app.get('/api/agent-token', adminAuth, (req, res) => res.json({ token: db.agentToken }));
 app.get('/api/export', adminAuth, (req, res) => {
   res.set('Content-Disposition', 'attachment; filename="tablet-dashboard-export.json"');
   res.json({ format: 'tablet-dashboard-v2', exportedAt: new Date().toISOString(),

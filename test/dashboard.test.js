@@ -18,7 +18,7 @@ async function freePort() {
 async function startDashboard(dataDir, port) {
   const child = spawn(process.execPath, ['server.js'], {
     cwd: path.join(__dirname, '..'),
-    env: { ...process.env, DATA_DIR: dataDir, PORT: String(port) },
+    env: { ...process.env, DATA_DIR: dataDir, PORT: String(port), PC_ALLOW_IP: '127.0.0.1' },
     stdio: 'ignore'
   });
   const base = `http://127.0.0.1:${port}`;
@@ -40,7 +40,7 @@ function utcIcsDate(date) {
   return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
 }
 
-test('dashboard data, agent access, privacy, and backup recovery', async () => {
+test('dashboard data, pc access, privacy, and backup recovery', async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tablet-dashboard-test-'));
   const port = await freePort();
   let dashboard;
@@ -65,13 +65,12 @@ test('dashboard data, agent access, privacy, and backup recovery', async () => {
       return { status: response.status, data: await response.json() };
     };
 
-    assert.equal((await request('/api/pc', 'POST', { cpu: 20 })).status, 401);
+    assert.equal((await request('/api/pc', 'POST', { cpu: 21, gpu: null })).status, 200);
     const setup = await request('/api/setup', 'POST', { user: 'tester', pass: 'a-long-test-password' });
     assert.equal(setup.status, 200);
     const token = setup.data.token;
-    const agentToken = (await request('/api/agent-token', 'GET', null, token)).data.token;
-    assert.equal(agentToken.length, 64);
-    assert.equal((await request('/api/pc', 'POST', { cpu: 21, gpu: null }, agentToken)).status, 200);
+    assert.equal((await fetch(base + '/api/agent-token',
+      { headers: { Authorization: `Bearer ${token}` } })).status, 404);
     assert.equal((await request('/api/snapshot')).data.pc.gpu, null);
 
     const task = (await request('/api/todos', 'POST', { text: 'Daily task', repeat: 'daily' }, token)).data;
