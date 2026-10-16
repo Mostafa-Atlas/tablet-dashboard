@@ -42,37 +42,75 @@ function refreshPCStatus() {
   $('pc-age').textContent = pc.updatedAt ? (age <= 2 ? 'updated just now' : `updated ${age}s ago`) : 'agent not connected yet';
   syncLayout();
 }
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const numAnim = {};
+function tweenNumber(k, target) {
+  const el = $(k + '-v');
+  if (numAnim[k]) cancelAnimationFrame(numAnim[k]);
+  if (reduceMotion) { el.textContent = Math.round(target) + '%'; return; }
+  const from = parseFloat(el.textContent) || 0;
+  if (from === Math.round(target)) { el.textContent = Math.round(target) + '%'; return; }
+  const start = performance.now(), dur = 600;
+  const step = now => {
+    const t = Math.min(1, (now - start) / dur), e = 1 - Math.pow(1 - t, 3);
+    el.textContent = Math.round(from + (target - from) * e) + '%';
+    if (t < 1) numAnim[k] = requestAnimationFrame(step);
+    else delete numAnim[k];
+  };
+  numAnim[k] = requestAnimationFrame(step);
+}
 function setBar(k, v) {
   if (v == null) {
+    if (numAnim[k]) { cancelAnimationFrame(numAnim[k]); delete numAnim[k]; }
     $(k + '-v').textContent = '—';
     $(k + '-b').style.width = '0%';
     return;
   }
   v = Math.max(0, Math.min(100, Number(v) || 0));
-  $(k + '-v').textContent = Math.round(v) + '%';
+  tweenNumber(k, v);
   $(k + '-b').style.width = v + '%';
+}
+function diskVals(d) {
+  const pct = Math.max(0, Math.min(100, Number(d.pct) || 0));
+  const total = d.totalGb != null ? ` of ${d.totalGb} GB` : '';
+  return { mount: String(d.mount || d.disk || 'Disk'), pct,
+    pctTxt: Math.round(pct) + '%',
+    freeTxt: `${d.freeGb != null ? d.freeGb : '—'} GB free${total}` };
 }
 function renderDisks(disks) {
   const box = $('disks');
   if (!Array.isArray(disks) || !disks.length) { box.innerHTML = '<div class="dim sub">Waiting for agent…</div>'; return; }
+  const list = disks.slice(0, 6).map(diskVals);
+  const rows = [...box.children].filter(el => el.classList?.contains('disk'));
+  if (rows.length === list.length && rows.every((row, i) => row.dataset.mount === list[i].mount)) {
+    // same drives: update in place so bars glide instead of rebuilding
+    rows.forEach((row, i) => {
+      row.classList.toggle('full', list[i].pct >= 80);
+      row.querySelector('.disk-label b').textContent = list[i].pctTxt;
+      row.querySelector('.bar i').style.width = list[i].pct + '%';
+      row.querySelector('.disk-free').textContent = list[i].freeTxt;
+    });
+    return;
+  }
   box.innerHTML = '';
-  disks.slice(0, 6).forEach(d => {
-    const pct = Math.max(0, Math.min(100, Number(d.pct) || 0));
+  list.forEach(v => {
     const row = document.createElement('div');
-    row.className = 'disk' + (pct >= 80 ? ' full' : '');
+    row.className = 'disk' + (v.pct >= 80 ? ' full' : '');
+    row.dataset.mount = v.mount;
     const label = document.createElement('div');
     label.className = 'disk-label';
-    label.innerHTML = `<span>${escapeHtml(String(d.mount || d.disk || 'Disk'))}</span><b>${Math.round(pct)}%</b>`;
+    label.innerHTML = `<span></span><b></b>`;
+    label.firstChild.textContent = v.mount;
+    label.querySelector('b').textContent = v.pctTxt;
     const bar = document.createElement('div');
     bar.className = 'bar small';
     const fill = document.createElement('i');
-    fill.style.width = pct + '%';
+    fill.style.width = v.pct + '%';
     bar.appendChild(fill);
     row.append(label, bar);
-    const total = d.totalGb != null ? ` of ${d.totalGb} GB` : '';
     const f = document.createElement('div');
     f.className = 'disk-free dim';
-    f.textContent = `${d.freeGb != null ? d.freeGb : '—'} GB free${total}`;
+    f.textContent = v.freeTxt;
     row.appendChild(f);
     box.appendChild(row);
   });
