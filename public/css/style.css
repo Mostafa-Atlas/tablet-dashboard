@@ -137,8 +137,8 @@ body.focus #pc-card{display:none}
 body.focus #grid{grid-template-columns:minmax(0,1.2fr) minmax(280px,1fr)}
 @media (min-width:1101px){
   body:not(.focus) #life-column{grid-column:1;grid-row:1 / span 2}
-  body:not(.focus) #timer-card{grid-column:2;grid-row:1}
-  body:not(.focus) #media-card{grid-column:2;grid-row:2}
+  body:not(.focus) #media-card{grid-column:2;grid-row:1}
+  body:not(.focus) #timer-card{grid-column:2;grid-row:2}
   body:not(.focus) #pc-card{grid-column:3;grid-row:1}
   body:not(.focus) #routine-section{grid-column:3;grid-row:2}
   body.compact-grid #life-column{grid-column:1;grid-row:1 / span 3}
