@@ -72,6 +72,14 @@ test('dashboard data, pc access, privacy, and backup recovery', async () => {
     assert.equal((await fetch(base + '/api/agent-token',
       { headers: { Authorization: `Bearer ${token}` } })).status, 404);
     assert.equal((await request('/api/snapshot')).data.pc.gpu, null);
+    assert.equal((await request('/api/now-playing', 'POST',
+      { playing: true, title: 'Test Song', artist: 'Tester', thumb: 'data:image/jpeg;base64,xx' })).status, 200);
+    const np = (await request('/api/snapshot')).data.media;
+    assert.equal(np.title, 'Test Song');
+    assert.equal(np.thumb, 'data:image/jpeg;base64,xx');
+    assert.equal((await request('/api/now-playing', 'POST', { playing: false, title: 'Test Song', artist: 'Tester' })).status, 200);
+    assert.equal((await request('/api/now-playing')).data.thumb, 'data:image/jpeg;base64,xx');
+    assert.equal((await request('/api/snapshot')).data.media.playing, false);
 
     const task = (await request('/api/todos', 'POST', { text: 'Daily task', repeat: 'daily' }, token)).data;
     assert.equal((await request(`/api/todos/${task.id}`, 'PATCH', { done: true }, token)).status, 200);

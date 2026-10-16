@@ -261,11 +261,13 @@ function publicCalendar() {
   const redact = e => e ? { ...e, summary: 'Private event', location: '' } : null;
   return { ...db.calendar, next: redact(db.calendar.next), upcoming: db.calendar.upcoming.map(redact) };
 }
+let media = { playing: false, title: null, artist: null, album: null, app: null, thumb: null, updatedAt: 0 };
+function mediaKey(m) { return [(m.title || ''), (m.artist || ''), (m.album || '')].join('\n'); }
 function snapshot() {
   rolloverTodos();
   return { now: Date.now(), pc: db.pc, todos: todosForClient(), timers: sortTimers(db.timers),
     weather: db.weather, time: db.time, calendar: publicCalendar(), display: db.display,
-    note: db.note, routines: routinesForClient() };
+    note: db.note, routines: routinesForClient(), media };
 }
 app.get('/api/snapshot', (req, res) => res.json(snapshot()));
 
@@ -292,6 +294,28 @@ app.post('/api/pc', (req, res) => {
   res.json({ ok: true });
 });
 app.get('/api/pc', (req, res) => res.json(db.pc));
+
+// ---- Now playing: agent POSTs Windows SMTC state every ~5s (same IP allowlist) ----
+app.post('/api/now-playing', (req, res) => {
+  if (clientIp(req) !== PC_ALLOW_IP) return res.status(403).json({ error: 'PC not allowed' });
+  const b = req.body || {};
+  const str = (v, n) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, n) : null);
+  const next = {
+    playing: !!b.playing,
+    title: str(b.title, 120), artist: str(b.artist, 120),
+    album: str(b.album, 120), app: str(b.app, 80),
+    thumb: null, updatedAt: Date.now()
+  };
+  if (typeof b.thumb === 'string' && b.thumb.startsWith('data:image/') && b.thumb.length < 250000) {
+    next.thumb = b.thumb;
+  } else if (mediaKey(next) === mediaKey(media)) {
+    next.thumb = media.thumb; // metadata-only refresh: keep the art
+  }
+  media = next;
+  broadcast('media', media);
+  res.json({ ok: true });
+});
+app.get('/api/now-playing', (req, res) => res.json(media));
 
 // ---- Todos ----
 const cairoDate = new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' });

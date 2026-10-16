@@ -287,6 +287,22 @@ function renderTime(t) {
   tickClock();
 }
 
+/* ---------- Now playing (Windows SMTC via agent) ---------- */
+let lastMedia = null;
+function renderMedia(m) {
+  lastMedia = m || null;
+  const has = !!(m && m.playing && m.title);
+  $('media-card').hidden = !has;
+  if (!has) { syncLayout(); return; }
+  $('media-title').textContent = m.title;
+  $('media-artist').textContent = [m.artist, m.album].filter(Boolean).join(' · ');
+  $('media-app').textContent = m.app ? '▶ ' + m.app : '▶ Playing';
+  const art = $('media-art');
+  if (m.thumb) { art.src = m.thumb; art.hidden = false; }
+  else art.hidden = true;
+  syncLayout();
+}
+
 /* ---------- Today: vertical timeline ---------- */
 let lastCal = null;
 function renderEvent(cal) {
@@ -590,7 +606,7 @@ function renderSnapshot(j) {
   serverClockOffsetMs = Number(j.now) ? Number(j.now) - Date.now() : serverClockOffsetMs;
   renderPC(j.pc); renderTodos(j.todos); renderTimers(j.timers); renderWeather(j.weather);
   renderTime(j.time); applyDisplay(j.display); renderEvent(j.calendar);
-  renderNote(j.note); renderRoutines(j.routines);
+  renderNote(j.note); renderRoutines(j.routines); renderMedia(j.media);
 }
 
 async function boot() {
@@ -613,6 +629,7 @@ async function boot() {
   es.addEventListener('calendar', e => { try { renderEvent(JSON.parse(e.data)); } catch {} });
   es.addEventListener('display', e => { try { applyDisplay(JSON.parse(e.data)); } catch {} });
   es.addEventListener('note', e => { try { renderNote(JSON.parse(e.data)); } catch {} });
+  es.addEventListener('media', e => { try { renderMedia(JSON.parse(e.data)); } catch {} });
   es.addEventListener('routines', e => { try { renderRoutines(JSON.parse(e.data)); } catch {} });
   setInterval(async () => {
     try { renderWeather(await (await fetch('/api/weather')).json()); } catch {}

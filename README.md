@@ -41,9 +41,17 @@ Copy-Item agent/.env.example agent/.env   # then edit SERVER inside
 python agent/agent.py
 ```
 
+Or with uv (no venv needed):
+
+```powershell
+cd "E:\Projects\Tablet dashbaord"
+Copy-Item agent/.env.example agent/.env   # then edit SERVER inside
+uv run --with psutil --with GPUtil --with winsdk agent/agent.py
+```
+
 `agent/.env` holds `SERVER=http://<lab-ip>:1200` (or the server's Tailscale IP). Real environment variables still work and override `.env`. Never commit `agent/.env`.
 
-The agent posts CPU, GPU, and RAM about every 2 seconds and refreshes disk information every 3 hours. If no supported GPU reading is available, the kiosk shows `—` rather than `0%`. The tablet shows **PC OFFLINE** when updates are more than 10 seconds old, even if the agent stops without disconnecting cleanly.
+The agent posts CPU, GPU, and RAM about every 2 seconds and refreshes disk information every 3 hours. It also reports whatever is playing on the PC (Spotify, browser, any app) with album art about every 5 seconds; the tablet shows a Now Playing card while music plays and hides it when nothing does (needs the `winsdk` dependency on Windows). If no supported GPU reading is available, the kiosk shows `—` rather than `0%`. The tablet shows **PC OFFLINE** when updates are more than 10 seconds old, even if the agent stops without disconnecting cleanly.
 
 For Task Scheduler, run the agent at logon with `SERVER` in its environment. Give the laptop a DHCP reservation so it keeps 192.168.50.2. The agent only makes outbound requests from the PC. Note: run the server directly with `node server.js` — behind Docker's NAT the server sees the Docker gateway IP instead of the laptop's, so the allowlist will not match.
 
@@ -101,6 +109,7 @@ The integration test uses a temporary data directory; it checks agent authentica
 | `GET /api/snapshot`, `/api/stream` | Display clients | Initial state and live updates |
 | `GET /api/health` | Display clients | Server and PC freshness |
 | `POST /api/pc` | 192.168.50.2 only | Windows PC stats |
+| `POST /api/now-playing`, `GET /api/now-playing` | 192.168.50.2 posts / anyone reads | PC now-playing + album art |
 | `GET /api/todos`, `/api/timers`, `/api/calendar`, `/api/display` | Display clients | Read-only dashboard data |
 | `POST/PATCH/DELETE /api/todos`, `/api/timers` | Admin bearer token | Edit tasks and timers |
 | `POST /api/display`, `/api/settings`, `/api/time` | Admin bearer token | Display, calendar, and clock settings |

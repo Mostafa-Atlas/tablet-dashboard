@@ -134,9 +134,93 @@ def disks_cached(cache, last):
     cache[:] = out
     return out
 
-def post(payload):
+try:
+    from winsdk.windows.media.control import GlobalSystemMediaTransportControlsSessionManager as _SM
+    from winsdk.windows.storage.streams import Buffer as _Buf, InputStreamOptions as _ISO
+    _HAS_SM = True
+except Exception:
+    _HAS_SM = False
+
+def _pretty_app(uid):
+    u = (uid or "").lower()
+    if "spotify" in u:
+        return "Spotify"
+    if "chrome" in u:
+        return "Chrome"
+    if "edge" in u or "msedge" in u:
+        return "Edge"
+    if "firefox" in u:
+        return "Firefox"
+    return (uid or "").split("!")[0].split("_")[0] or None
+
+def media_snapshot():
+    # What's playing on this PC (Spotify, browser, anything) via Windows SMTC.
+    # Returns None when unreadable so the server keeps its last state.
+    if not _HAS_SM:
+        return None
+    try:
+        import asyncio, base64
+
+        async def _get():
+            mgr = await _SM.request_async()
+            sess = mgr.get_current_session()
+            if sess is None:
+                return {"playing": False}
+            status = sess.get_playback_info().playback_status
+            playing = getattr(status, "name", "") == "PLAYING" or int(status) == 4
+            props = await sess.try_get_media_properties_async()
+            if props is None:
+                return {"playing": False}
+            try:
+                app = _pretty_app(sess.source_app_user_model_id)
+            except Exception:
+                app = None
+            thumb = None
+            try:
+                ref = props.thumbnail
+                if ref is not None:
+                    stream = await ref.open_read_async()
+                    if stream.size and stream.size < 160 * 1024:
+                        buf = _Buf(stream.size)
+                        n = await stream.read_async(buf, buf.capacity, _ISO.READ_AHEAD)
+                        raw = bytes(bytearray(buf)[:n])
+                        if raw:
+                            try:
+                                ctype = stream.content_type or "image/jpeg"
+                            except Exception:
+                                ctype = "image/jpeg"
+                            thumb = "data:" + ctype + ";base64," + base64.b64encode(raw).decode()
+            except Exception:
+                pass
+            return {"playing": bool(playing),
+                    "title": getattr(props, "title", "") or "",
+                    "artist": getattr(props, "artist", "") or "",
+                    "album": getattr(props, "album_title", "") or getattr(props, "subtitle", "") or "",
+                    "app": app, "thumb": thumb}
+
+        return asyncio.run(_get())
+    except Exception:
+        return None
+
+_media_state = {"key": None, "thumb_at": 0}
+
+def post_media():
+    snap = media_snapshot()
+    if snap is None:
+        return
+    key = "\n".join([snap.get("title", ""), snap.get("artist", ""), snap.get("album", "")])
+    payload = {"playing": snap["playing"], "title": snap.get("title") or "",
+               "artist": snap.get("artist") or "", "album": snap.get("album") or "",
+               "app": snap.get("app") or ""}
+    if (key != _media_state["key"] or time.time() - _media_state["thumb_at"] > 300) and snap.get("thumb"):
+        payload["thumb"] = snap["thumb"]
+        _media_state["thumb_at"] = time.time()
+    _media_state["key"] = key
+    post("now-playing", payload)
+
+def post(path, payload):
     data = json.dumps(payload).encode()
-    req = urllib.request.Request(SERVER + "/api/pc", data=data, headers={
+    req = urllib.request.Request(SERVER + "/api/" + path, data=data, headers={
         "Content-Type": "application/json"
     })
     try:
@@ -152,6 +236,7 @@ def main():
     cache, last = [], [0]
     import time as t
     boot = t.time() - (psutil.boot_time() if psutil else t.time())
+    tick = 0
     while True:
         try:
             if psutil:
@@ -165,7 +250,10 @@ def main():
                 "uptimeSec": uptime,
                 "disks": disks_cached(cache, last),
             }
-            post(payload)
+            post("pc", payload)
+            tick += 1
+            if tick % 5 == 0:
+                post_media()
         except Exception as e:
             print("loop error:", e)
         time.sleep(INTERVAL)
