@@ -37,10 +37,11 @@ Requirements: Python 3.11+ and the dependencies in `agent/requirements.txt`. In 
 ```powershell
 cd "E:\Projects\Tablet dashbaord"
 pip install -r agent/requirements.txt
-$env:SERVER = "http://<lab-ip>:1200"   # or the server's Tailscale IP; not localhost on another PC
-$env:AGENT_TOKEN = "<token-from-admin>"
+Copy-Item agent/.env.example agent/.env   # then edit SERVER + AGENT_TOKEN inside
 python agent/agent.py
 ```
+
+`agent/.env` holds `SERVER=http://<lab-ip>:1200` (or the server's Tailscale IP) and `AGENT_TOKEN=<token-from-admin>`. Real environment variables still work and override `.env`. Never commit `agent/.env`.
 
 The agent posts CPU, GPU, and RAM about every 2 seconds and refreshes disk information every 3 hours. If no supported GPU reading is available, the kiosk shows `—` rather than `0%`. The tablet shows **PC OFFLINE** when updates are more than 10 seconds old, even if the agent stops without disconnecting cleanly.
 

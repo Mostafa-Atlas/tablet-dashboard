@@ -3,13 +3,34 @@ Win11 PC agent -> POSTs CPU/GPU/RAM to home-lab server every 2s.
 Disks only refreshed every 3h (per spec) to save IO.
 
 Run:  pip install -r requirements.txt
-      set SERVER=http://192.168.1.50:1200  (your home-lab IP, or Tailscale IP)
-      set AGENT_TOKEN=<token shown in /admin>
+      copy .env.example .env   (then edit SERVER + AGENT_TOKEN inside)
       python agent.py
 Tip: run on startup via Task Scheduler.
+Env can also come from real environment variables; those override .env.
 """
 import os, time, shutil, socket
 import urllib.request, urllib.error, json
+
+def _load_dotenv():
+    # Minimal .env loader (stdlib only): reads agent/.env, never overrides real env.
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        p = os.path.join(here, '.env')
+        if not os.path.exists(p):
+            return
+        with open(p, encoding='utf-8') as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith('#') or '=' not in line:
+                    continue
+                k, v = line.split('=', 1)
+                k, v = k.strip(), v.strip().strip('"').strip("'")
+                if k and k not in os.environ:
+                    os.environ[k] = v
+    except Exception:
+        pass
+
+_load_dotenv()
 
 SERVER = os.environ.get("SERVER", "http://localhost:1200").rstrip("/")
 AGENT_TOKEN = os.environ.get("AGENT_TOKEN", "")
