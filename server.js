@@ -44,7 +44,7 @@ function defaultDb() {
       { id: 'long1', name: 'Long term', type: 'long', targetAt: Date.now() + 12 * 24 * 3600 * 1000, createdAt: Date.now(), done: false, pausedLeftSec: null }
     ],
     pc: {
-      cpu: 0, ram: 0, gpu: 0, gpuTemp: null, cpuTemp: null,
+      cpu: null, ram: null, gpu: null, gpuTemp: null, cpuTemp: null,
       uptimeSec: 0, disks: [], updatedAt: 0
     },
     weather: { temp: null, code: null, label: '—', isDay: null, high: null, low: null, rainChance: null, updatedAt: 0 },
@@ -278,8 +278,8 @@ app.post('/api/pc', (req, res) => {
   if (clientIp(req) !== PC_ALLOW_IP) return res.status(403).json({ error: 'PC not allowed' });
   const b = req.body || {};
   db.pc = {
-    cpu: num(b.cpu, 0),
-    ram: num(b.ram, 0),
+    cpu: b.cpu == null ? null : num(b.cpu, null),
+    ram: b.ram == null ? null : num(b.ram, null),
     gpu: b.gpu == null ? null : num(b.gpu, null),
     gpuTemp: b.gpuTemp ?? null,
     cpuTemp: b.cpuTemp ?? null,

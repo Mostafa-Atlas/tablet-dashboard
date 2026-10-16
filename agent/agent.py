@@ -41,7 +41,56 @@ try:
     import psutil
 except ImportError:
     psutil = None
-    print("WARN: psutil not installed, sending mock values. pip install psutil")
+    print("WARN: psutil not installed, using Windows readings (pip install psutil for better accuracy)")
+
+def sys_fallback():
+    # (cpu_pct, ram_pct) straight from Windows when psutil is missing.
+    # One PowerShell call; (None, None) when unreadable — never fake zeros.
+    try:
+        import subprocess
+        out = subprocess.check_output(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+             "$cpu = (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average; "
+             "$os = Get-CimInstance Win32_OperatingSystem; "
+             "@{cpu=$cpu; total=$os.TotalVisibleMemorySize; free=$os.FreePhysicalMemory} | ConvertTo-Json -Compress"],
+            stderr=subprocess.DEVNULL, timeout=20).decode().strip()
+        m = json.loads(out)
+        cpu = m.get("cpu")
+        cpu = None if cpu is None else round(float(cpu), 1)
+        total = float(m.get("total") or 0)
+        free = float(m.get("free") or 0)
+        ram = round((total - free) / total * 100, 1) if total > 0 else None
+        return cpu, ram
+    except Exception:
+        return None, None
+
+def disks_fallback():
+    # All fixed drives via Windows when psutil is missing. None when unreadable.
+    try:
+        import subprocess
+        out = subprocess.check_output(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+             "(Get-CimInstance Win32_LogicalDisk -Filter \"DriveType=3\" | "
+             "Select-Object DeviceID,FreeSpace,Size | ConvertTo-Json -Compress)"],
+            stderr=subprocess.DEVNULL, timeout=20).decode().strip()
+        items = json.loads(out)
+        if isinstance(items, dict):
+            items = [items]
+        drives = []
+        for d in items or []:
+            try:
+                size = float(d.get("Size") or 0)
+                free = float(d.get("FreeSpace") or 0)
+                if size <= 0:
+                    continue
+                drives.append({"mount": str(d.get("DeviceID") or "?"),
+                               "pct": round((size - free) / size * 100, 1),
+                               "freeGb": round(free / 1e9, 1), "totalGb": round(size / 1e9, 1)})
+            except Exception:
+                continue
+        return drives or None
+    except Exception:
+        return None
 
 def gpu_pct():
     # Try GPUtil, else nvidia-smi; None means no supported reading.
@@ -74,9 +123,13 @@ def disks_cached(cache, last):
             except Exception:
                 continue
     else:
-        total, used, free = shutil.disk_usage("C:\\")
-        out.append({"mount": "C:", "pct": round(used / total * 100, 1),
-                    "freeGb": round(free / 1e9, 1), "totalGb": round(total / 1e9, 1)})
+        fb = disks_fallback()
+        if fb:
+            out.extend(fb)
+        else:
+            total, used, free = shutil.disk_usage("C:\\")
+            out.append({"mount": "C:", "pct": round(used / total * 100, 1),
+                        "freeGb": round(free / 1e9, 1), "totalGb": round(total / 1e9, 1)})
     last[0] = time.time()
     cache[:] = out
     return out
@@ -101,8 +154,11 @@ def main():
     boot = t.time() - (psutil.boot_time() if psutil else t.time())
     while True:
         try:
-            cpu = psutil.cpu_percent(interval=None) if psutil else 0
-            ram = psutil.virtual_memory().percent if psutil else 0
+            if psutil:
+                cpu = psutil.cpu_percent(interval=None)
+                ram = psutil.virtual_memory().percent
+            else:
+                cpu, ram = sys_fallback()
             uptime = int(t.time() - (psutil.boot_time() if psutil else t.time() - boot))
             payload = {
                 "cpu": cpu, "ram": ram, "gpu": gpu_pct(),
