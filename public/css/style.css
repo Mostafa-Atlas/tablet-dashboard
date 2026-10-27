@@ -84,3 +84,61 @@ li.empty-msg{border-bottom:none}
 .tl-now-txt{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--warn)}
 /* 10" portrait / small fallback: stack */
 @media (max-width:900px){ #grid{grid-template-columns:1fr;overflow-y:auto} .timer-left{font-size:40px} }
+/* Existing dashboard adapted to tablet landscape and scrollable portrait. */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.data-warning{color:var(--warn)}
+#topbar{gap:12px;flex:none}
+.tb-left{display:flex;align-items:baseline;gap:12px;min-width:0;flex-wrap:wrap}
+#clock{margin:0;white-space:nowrap;font-size:clamp(23px,3.1vw,32px)}
+#date{white-space:nowrap;font-size:18px}
+.tb-right{justify-content:flex-end;flex-wrap:wrap;gap:6px;max-width:50%}
+.pill{white-space:nowrap;font-size:11px;padding:6px 9px}
+#weather{font-size:14px;overflow-wrap:anywhere;text-align:right}
+#grid{grid-template-columns:minmax(230px,.95fr) minmax(240px,1fr) minmax(260px,1.05fr)}
+#grid>.card{min-width:0}
+#pc-card{overflow-y:auto;display:block}
+#pc-card.stale .stat,#pc-card.stale #disks{opacity:.65}
+#disks{flex:none}
+.disk-label{gap:8px}.disk-label span{overflow-wrap:anywhere;min-width:0}
+.disk-label b{flex:none}
+#timers{flex:1}
+.timer{flex:none;min-width:0;padding:12px}
+.timer-name{white-space:normal;overflow-wrap:anywhere;min-width:0}
+.timer-head{flex-wrap:wrap;gap:7px}.timer-badge{padding:3px 6px}
+.timer-left{font-size:clamp(30px,4.5vw,48px);overflow-wrap:anywhere}
+.timer.short .timer-left{font-size:clamp(28px,4vw,42px)}
+#life-card{overflow-y:auto;display:block}
+#todos li{font-size:17px;line-height:1.35;align-items:flex-start}
+#todos li>span:last-child{min-width:0;overflow-wrap:anywhere}
+#todos .chk{margin-top:3px}
+#todos li.sub{font-size:13px}
+#life-card .mt{margin-top:18px;padding-top:14px}
+.tl-wrap{overflow:visible;flex:none}.tl-title,.tl-meta,.tl-chip{overflow-wrap:anywhere}
+.card.center>.sub{flex:none}
+@media (max-height:650px) and (min-width:901px){
+  #topbar{padding:9px 16px}#grid{padding:10px;gap:10px}
+  #grid>.card{padding:14px}.stat{margin:10px 0}
+  .disk{padding:8px 10px}.disk-free{margin-top:3px}#disks{gap:7px}
+}
+@media (max-width:900px){
+  body{overflow:auto}
+  #app{height:auto;min-height:100vh}
+  #grid{display:flex;flex-direction:column;overflow:visible;flex:none}
+  #grid>.card{flex:none;overflow:visible;min-height:0}
+  #timer-card{order:-2}#life-card{order:-1}
+  #timers{overflow:visible;flex:none}
+  .timer-left,.timer.short .timer-left{font-size:40px}
+  #disks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:480px){
+  #topbar{align-items:flex-start;padding:12px;gap:8px}
+  .tb-left{display:flex;flex-direction:column;gap:2px;flex:none}
+  .tb-right{max-width:49%;gap:5px}
+  #clock{font-size:23px}#date{font-size:14px}#weather{font-size:12px;width:100%}
+  .pill{font-size:10px;padding:5px 7px}
+  #grid{padding:10px;gap:10px}.card{padding:16px}
+  #disks{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
+}

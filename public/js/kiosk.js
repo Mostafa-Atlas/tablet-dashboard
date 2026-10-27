@@ -3,40 +3,42 @@ const $ = id => document.getElementById(id);
 
 // Dashboard clock = real time + server offset (set from /admin). 0 = real time.
 let clockOffsetSec = 0;
-function dashboardNow() { return new Date(Date.now() + clockOffsetSec * 1000); }
+function dashboardNow() { return new Date(DashboardTime.now() + clockOffsetSec * 1000); }
 
 function tickClock() {
-  const d = dashboardNow();
-  let h = d.getHours(), m = String(d.getMinutes()).padStart(2, '0');
-  const s = String(d.getSeconds()).padStart(2, '0');
-  const ap = h >= 12 ? 'PM' : 'AM';
-  h = h % 12 || 12;
-  $('clock').textContent = `${h}:${m}:${s} ${ap}`;
-  // day-month-year: 12-1-2026
-  $('date').textContent = `${d.getDate()}-${d.getMonth() + 1}-${d.getFullYear()}`;
+  const ms = dashboardNow().getTime();
+  $('clock').textContent = DashboardTime.time(ms, true);
+  $('date').textContent = DashboardTime.date(ms);
 }
 setInterval(tickClock, 1000); tickClock();
 
 /* ---------- PC + storage ---------- */
+let lastPC = null;
 function renderPC(pc) {
-  pc = pc || {};
+  lastPC = pc || {};
+  pc = lastPC;
   setBar('cpu', pc.cpu); setBar('gpu', pc.gpu); setBar('ram', pc.ram);
   const temps = [];
   if (pc.cpuTemp != null) temps.push(`CPU ${pc.cpuTemp}°C`);
   if (pc.gpuTemp != null) temps.push(`GPU ${pc.gpuTemp}°C`);
   $('temps').textContent = temps.join(' · ') || '—';
   renderDisks(pc.disks);
-  // age can read negative when tablet/server clocks differ -> clamp
-  const age = pc.updatedAt ? Math.max(0, Math.round((Date.now() - pc.updatedAt) / 1000)) : 999;
-  const pill = $('pc-state');
-  if (age < 10) { pill.textContent = 'PC ONLINE'; pill.className = 'pill ok'; }
-  else { pill.textContent = 'PC OFFLINE'; pill.className = 'pill bad'; }
-  $('pc-age').textContent = pc.updatedAt ? (age <= 2 ? 'updated just now' : `updated ${age}s ago`) : 'agent not connected yet';
+  tickPC();
 }
+function tickPC() {
+  const pc = lastPC || {};
+  const age = pc.updatedAt ? Math.max(0, Math.floor((DashboardTime.now() - pc.updatedAt) / 1000)) : null;
+  const pill = $('pc-state');
+  pill.textContent = age == null ? 'PC NO SAMPLE' : age < 10 ? 'PC ONLINE' : 'PC STALE';
+  pill.className = 'pill ' + (age != null && age < 10 ? 'ok' : 'bad');
+  $('pc-card').classList.toggle('stale', age == null || age >= 10);
+  $('pc-age').textContent = age == null ? 'Agent not connected yet' : age <= 2 ? 'Updated just now' : `Last sample ${age}s ago`;
+}
+setInterval(tickPC, 1000);
 function setBar(k, v) {
-  v = Math.max(0, Math.min(100, Number(v) || 0));
-  $(k + '-v').textContent = Math.round(v) + '%';
-  $(k + '-b').style.width = v + '%';
+  const available = typeof v === 'number' && Number.isFinite(v);
+  $(k + '-v').textContent = available ? Math.round(v) + '%' : '— unavailable';
+  $(k + '-b').style.width = available ? Math.max(0, Math.min(100, v)) + '%' : '0%';
 }
 function renderDisks(disks) {
   const box = $('disks');
@@ -72,6 +74,7 @@ function renderTodos(list) {
   const ul = $('todos'); ul.innerHTML = '';
   const vis = (list || []).filter(t => !t.done).slice(0, 5);
   const done = (list || []).filter(t => t.done).length;
+  const hidden = (list || []).filter(t => !t.done).length - vis.length;
   if (!vis.length) ul.innerHTML = '<li class="empty-msg dim">You have nothing to do, sir</li>';
   vis.forEach(t => {
     const li = document.createElement('li');
@@ -79,6 +82,7 @@ function renderTodos(list) {
     li.lastChild.textContent = t.text;
     ul.appendChild(li);
   });
+  if (hidden > 0) { const li = document.createElement('li'); li.className = 'dim sub'; li.textContent = `+ ${hidden} more tasks in /admin`; ul.appendChild(li); }
   if (done) { const li = document.createElement('li'); li.className = 'dim'; li.textContent = `+ ${done} done`; ul.appendChild(li); }
 }
 
@@ -95,7 +99,7 @@ function normalizeTimers(t) {
   return arr;
 }
 function renderTimers(t) {
-  timers = normalizeTimers(t);
+  timers = [...normalizeTimers(t)].sort((a, b) => Number(a.done) - Number(b.done) || (a.targetAt || Infinity) - (b.targetAt || Infinity));
   const box = $('timers');
   box.innerHTML = '';
   if (!timers.length) { box.innerHTML = '<div class="dim">No timers — add from /admin</div>'; return; }
@@ -115,7 +119,7 @@ function renderTimers(t) {
 }
 function tickTimers() {
   if (!timers) return;
-  const now = Date.now();
+  const now = DashboardTime.now();
   timers.forEach(tm => {
     const card = document.getElementById('timer-' + tm.id);
     if (!card) return;
@@ -167,10 +171,15 @@ function fmt(sec) {
 }
 setInterval(tickTimers, 1000);
 
+let lastWeather = null;
 function renderWeather(w) {
-  if (!w || w.temp == null) { $('weather').textContent = '—'; return; }
-  $('weather').textContent = `${w.icon ? w.icon + ' ' : ''}${w.temp}°C ${w.label || ''}`;
+  lastWeather = w;
+  if (!w || w.temp == null) { $('weather').textContent = 'Weather unavailable'; return; }
+  const stale = DashboardTime.stale(w, 30 * 60000);
+  $('weather').textContent = `${w.icon ? w.icon + ' ' : ''}${w.temp}°C ${w.label || ''}${w.error ? ' · refresh failed' : stale ? ' · stale' : ''}`;
+  $('weather').classList.toggle('data-warning', !!w.error || stale);
 }
+setInterval(() => { if (lastWeather) renderWeather(lastWeather); }, 1000);
 
 function renderTime(t) {
   if (!t) return;
@@ -188,13 +197,16 @@ function renderEvent(cal) {
     el.innerHTML = '<span class="dim">Connect calendar in /admin</span>';
     return;
   }
-  const now = Date.now();
-  const dn = dashboardNow();
-  const dayStart = new Date(dn.getFullYear(), dn.getMonth(), dn.getDate()).getTime() - clockOffsetSec * 1000;
-  const dayEnd = dayStart + 86400000;
+  const now = DashboardTime.now();
+  const stale = DashboardTime.stale(cal, 20 * 60000);
+  if (cal.error || stale) {
+    const warning = document.createElement('div'); warning.className = 'data-warning sub';
+    warning.textContent = cal.error ? 'Calendar refresh failed · cached events may be stale' : 'Calendar data stale · refreshing';
+    el.appendChild(warning);
+  }
   const list = (cal.upcoming || [])
-    .filter(e => e.startMs < dayEnd && e.endMs > dayStart)
-    .sort((a, b) => a.startMs - b.startMs);
+    .filter(e => DashboardTime.today(e, now))
+    .sort((a, b) => Number(a.endMs <= now) - Number(b.endMs <= now) || a.startMs - b.startMs);
 
   // all-day chips first
   const allDay = list.filter(e => e.allDay);
@@ -223,8 +235,8 @@ function renderEvent(cal) {
     const past = e.endMs <= now, live = e.startMs <= now && now < e.endMs;
     const item = document.createElement('div');
     item.className = 'tl-item' + (past ? ' past' : '') + (live ? ' live' : '');
-    const s = new Date(e.startMs + clockOffsetSec * 1000);
-    const en = new Date(e.endMs + clockOffsetSec * 1000);
+    const s = new Date(e.startMs);
+    const en = new Date(e.endMs);
     const t = document.createElement('div');
     t.className = 'tl-time';
     t.textContent = fmtTime(s) + ' – ' + fmtTime(en);
@@ -250,38 +262,37 @@ function renderEvent(cal) {
   }
   el.appendChild(rail);
 }
-function fmtTime(d) {
-  let h = d.getHours(), m = String(d.getMinutes()).padStart(2, '0');
-  const ap = h >= 12 ? 'PM' : 'AM';
-  h = h % 12 || 12;
-  return `${h}:${m} ${ap}`;
-}
+function fmtTime(d) { return DashboardTime.time(d.getTime()); }
 function relTime(startMs, ongoing) {
   if (ongoing) return 'now';
-  const s = Math.max(0, Math.round((startMs - Date.now()) / 1000));
+  const s = Math.max(0, Math.round((startMs - DashboardTime.now()) / 1000));
   if (s < 3600) return `in ${Math.max(1, Math.round(s / 60))}m`;
   if (s < 86400) { const h = Math.floor(s / 3600), m = Math.round(s % 3600 / 60); return m ? `in ${h}h ${m}m` : `in ${h}h`; }
   return `in ${Math.round(s / 86400)}d`;
 }
 
+function applySnapshot(j) {
+  DashboardTime.sync(j.now);
+  DashboardTime.setZone(j.timeZone);
+  renderPC(j.pc); renderTodos(j.todos); renderTimers(j.timers); renderWeather(j.weather); renderTime(j.time); renderEvent(j.calendar);
+}
+function serverState(connected) {
+  $('server-state').textContent = connected ? 'Server connected' : 'Server reconnecting…';
+  $('server-state').className = 'pill ' + (connected ? 'ok' : 'bad');
+}
 async function boot() {
   try {
-    const j = await (await fetch('/api/snapshot')).json();
-    renderPC(j.pc); renderTodos(j.todos); renderTimers(j.timers); renderWeather(j.weather); renderTime(j.time); renderEvent(j.calendar);
-  } catch {}
+    const r = await fetch('/api/snapshot');
+    if (!r.ok) throw new Error('Snapshot failed');
+    applySnapshot(await r.json());
+  } catch { serverState(false); }
   const es = new EventSource('/api/stream');
-  es.addEventListener('snapshot', e => {
-    try { const j = JSON.parse(e.data); renderPC(j.pc); renderTodos(j.todos); renderTimers(j.timers); renderWeather(j.weather); renderTime(j.time); renderEvent(j.calendar); } catch {}
-  });
-  es.addEventListener('pc', e => { try { renderPC(JSON.parse(e.data)); } catch {} });
-  es.addEventListener('todos', e => { try { renderTodos(JSON.parse(e.data)); } catch {} });
-  es.addEventListener('timers', e => { try { renderTimers(JSON.parse(e.data)); } catch {} });
-  es.addEventListener('weather', e => { try { renderWeather(JSON.parse(e.data)); } catch {} });
-  es.addEventListener('time', e => { try { renderTime(JSON.parse(e.data)); } catch {} });
-  es.addEventListener('calendar', e => { try { renderEvent(JSON.parse(e.data)); } catch {} });
-  setInterval(async () => {
-    try { renderWeather(await (await fetch('/api/weather')).json()); } catch {}
-  }, 60000);
-  setInterval(() => { if (lastCal) renderEvent(lastCal); }, 30000); // refresh "in Xm" countdowns
+  es.addEventListener('open', () => serverState(true));
+  es.addEventListener('error', () => serverState(false));
+  es.addEventListener('snapshot', e => { try { applySnapshot(JSON.parse(e.data)); serverState(true); } catch { serverState(false); } });
+  for (const [name, render] of Object.entries({ pc: renderPC, todos: renderTodos, timers: renderTimers, weather: renderWeather, time: renderTime, calendar: renderEvent })) {
+    es.addEventListener(name, e => { try { render(JSON.parse(e.data)); } catch {} });
+  }
+  setInterval(() => { if (lastCal) renderEvent(lastCal); }, 30000);
 }
 boot();

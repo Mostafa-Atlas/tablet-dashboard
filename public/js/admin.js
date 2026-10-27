@@ -1,326 +1,336 @@
-// Admin with custom login page (token in localStorage, no browser Basic popup).
-let msgTimer = null;
-const msg = t => {
-  const el = document.getElementById('msg');
-  el.textContent = t || '';
-  el.classList.toggle('show', !!t);
-  clearTimeout(msgTimer);
-  if (t) msgTimer = setTimeout(() => el.classList.remove('show'), 2600);
-};
-const loginErr = t => document.getElementById('login-err').textContent = t || '';
-const setupErr = t => document.getElementById('setup-err').textContent = t || '';
-const getToken = () => localStorage.getItem('admin_token');
-
-async function authFetch(url, opts = {}) {
-  const headers = { ...(opts.headers || {}) };
-  const token = getToken();
-  if (token) headers['Authorization'] = 'Bearer ' + token;
-  if (opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
-  const r = await fetch(url, { ...opts, headers });
-  if (r.status === 401) { showLogin('Session expired — sign in again'); }
-  return r;
+// Checked mutations preserve drafts and keep remote updates away from active controls.
+const $ = id => document.getElementById(id);
+let authenticated = false, stream = null, msgTimer;
+let todos = [], timers = [], clockOffsetSec = 0, calendar = null, calendarDirty = false;
+const pending = new Map();
+let sessionGeneration = 0;
+const readEpoch = { todos: 0, timers: 0, time: 0, calendar: 0, settings: 0 };
+const readSequence = { todos: 0, timers: 0, time: 0, calendar: 0, settings: 0 };
+// Read epochs invalidate whole-resource GETs. Only an authoritative change to the
+// same item can supersede its mutation response; unrelated operations cannot.
+let authorityClock = 0;
+const itemVersions = { todos: new Map(), timers: new Map() };
+const valueVersions = { time: 0, calendar: 0 };
+function authorityVersion(resource, id) {
+  return itemVersions[resource]?.get(id) || valueVersions[resource] || 0;
 }
-
-function showSetup() {
-  document.getElementById('setup-shell').style.display = 'block';
-  document.getElementById('login-shell').style.display = 'none';
-  document.getElementById('panel').style.display = 'none';
+function recordAuthority(resource, id) {
+  if (itemVersions[resource]) itemVersions[resource].set(id, ++authorityClock);
+  else if (Object.hasOwn(valueVersions, resource)) valueVersions[resource] = ++authorityClock;
 }
-function showLogin(err) {
-  document.getElementById('setup-shell').style.display = 'none';
-  document.getElementById('login-shell').style.display = 'block';
-  document.getElementById('panel').style.display = 'none';
-  if (err) loginErr(err);
-}
-function showPanel() {
-  document.getElementById('setup-shell').style.display = 'none';
-  document.getElementById('login-shell').style.display = 'none';
-  document.getElementById('panel').style.display = 'block';
-  refresh();
-}
-
-async function doSetup() {
-  setupErr('');
-  const user = document.getElementById('setup-user').value.trim();
-  const pass = document.getElementById('setup-pass').value;
-  const pass2 = document.getElementById('setup-pass2').value;
-  if (pass !== pass2) { setupErr('Passwords do not match'); return; }
-  const btn = document.getElementById('setup-btn');
-  btn.disabled = true; btn.textContent = 'Creating…';
-  try {
-    const r = await fetch('/api/setup', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user, pass })
-    });
-    const j = await r.json();
-    if (!r.ok) { setupErr(j.error || 'Setup failed'); return; }
-    localStorage.setItem('admin_token', j.token);
-    showPanel();
-  } catch { setupErr('Cannot reach server'); }
-  finally { btn.disabled = false; btn.textContent = 'Create account'; }
-}
-document.getElementById('setup-btn').onclick = doSetup;
-
-async function doLogin() {
-  loginErr('');
-  const user = document.getElementById('login-user').value.trim();
-  const pass = document.getElementById('login-pass').value;
-  if (!user || !pass) { loginErr('Enter username and password'); return; }
-  const btn = document.getElementById('login-btn');
-  btn.disabled = true; btn.textContent = 'Signing in…';
-  try {
-    const r = await fetch('/api/login', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user, pass })
-    });
-    const j = await r.json();
-    if (j.needsSetup) { showSetup(); return; }
-    if (!r.ok) { loginErr(j.error || 'Login failed'); return; }
-    localStorage.setItem('admin_token', j.token);
-    document.getElementById('login-pass').value = '';
-    showPanel();
-  } catch { loginErr('Cannot reach server'); }
-  finally { btn.disabled = false; btn.textContent = 'Sign in'; }
-}
-
-async function refresh() {
-  const r = await authFetch('/api/todos');
-  if (!r.ok) return;  const todos = await r.json();
-  const ul = document.getElementById('list'); ul.innerHTML = '';
-  todos.forEach(t => {
-    const li = document.createElement('li');
-    if (t.done) li.className = 'done';
-    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!t.done;
-    cb.onchange = async () => {
-      await authFetch('/api/todos/' + t.id, { method: 'PATCH', body: JSON.stringify({ done: cb.checked }) });
-      refresh();
-    };
-    const sp = document.createElement('span'); sp.textContent = t.text; sp.className = 'grow';
-    const del = document.createElement('button'); del.textContent = '✕'; del.className = 'ghost';
-    del.onclick = async () => { await authFetch('/api/todos/' + t.id, { method: 'DELETE' }); refresh(); };
-    li.append(cb, sp, del); ul.appendChild(li);
-  });
-  refreshTimers();
-  refreshTime();
-  refreshCal();
-}
-
-async function refreshTimers() {
-  const r = await authFetch('/api/timers');
-  if (!r.ok) return;
-  const list = await r.json();
-  const ul = document.getElementById('timer-list'); ul.innerHTML = '';
-  if (!list.length) ul.innerHTML = '<li class="dim">No timers yet</li>';
-  list.forEach(t => {
-    const li = document.createElement('li');
-    if (t.done) li.className = 'done';
-    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!t.done; cb.title = 'mark done';
-    cb.onchange = async () => {
-      await authFetch('/api/timers/' + t.id, { method: 'PATCH', body: JSON.stringify({ done: cb.checked }) });
-      refreshTimers();
-    };
-    const sp = document.createElement('span'); sp.className = 'grow';
-    sp.textContent = `${t.done ? '✓ ' : ''}${t.name} — ${leftText(t)}`;
-    const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = t.type === 'long' ? '📅 long' : '⏱ short';
-    const col = document.createElement('input'); col.type = 'color'; col.title = 'Timer color';
-    col.value = /^#[0-9a-fA-F]{6}$/.test(t.color || '') ? t.color : '#2b6cff';
-    col.style.cssText = 'width:34px;padding:2px;cursor:pointer';
-    col.onchange = async () => {
-      await authFetch('/api/timers/' + t.id, { method: 'PATCH', body: JSON.stringify({ color: col.value }) });
-      msg('Color updated ✓');
-    };
-    const del = document.createElement('button'); del.textContent = '✕'; del.className = 'ghost';
-    del.onclick = async () => { await authFetch('/api/timers/' + t.id, { method: 'DELETE' }); refreshTimers(); };
-    li.append(cb, sp, tag, col, del); ul.appendChild(li);
-  });
-}
-function leftText(t) {
-  if (t.done) return 'done';
-  let ms = null;
-  if (t.targetAt) ms = t.targetAt - Date.now();
-  else if (t.pausedLeftSec != null) return 'paused ' + fmtDur(t.pausedLeftSec);
-  else return 'not set';
-  if (ms <= 0) return 'finished';
-  const s = Math.round(ms / 1000);
-  if (t.type === 'long') {
-    const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600);
-    return d >= 1 ? `${d}d ${h}h left` : fmtDur(s) + ' left';
+function recordSnapshotAuthority(resource, data) {
+  if (!itemVersions[resource]) { recordAuthority(resource); return; }
+  const before = new Map((resource === 'todos' ? todos : timers).map(item => [item.id, item]));
+  const after = new Map(data.map(item => [item.id, item]));
+  for (const id of new Set([...before.keys(), ...after.keys()])) {
+    // Retain deletion stamps so a late response cannot resurrect a removed item.
+    if (JSON.stringify(before.get(id)) !== JSON.stringify(after.get(id))) recordAuthority(resource, id);
   }
-  return fmtDur(s) + ' left';
+}
+const sessionStamp = () => ({ generation: sessionGeneration, token: getToken() });
+const currentSession = stamp => stamp.generation === sessionGeneration && stamp.token === getToken();
+function assertSession(stamp) { if (!currentSession(stamp)) throw new Error('Superseded session'); }
+function resourceFor(group) { return group.startsWith('todo:') ? 'todos' : group.startsWith('timer:') ? 'timers' : group === 'time' || group === 'calendar' ? group : null; }
+function advanceResource(resource) {
+  if (resource) readEpoch[resource]++;
+}
+function commitResource(resource, apply, data) { advanceResource(resource); recordSnapshotAuthority(resource, data); apply(); }
+function invalidateSession() {
+  sessionGeneration++;
+  authenticated = false; stream?.close(); stream = null;
+  clearTimeout(msgTimer); msg('');
+  for (const operation of pending.values()) operation.controls.forEach((control, i) => control.disabled = operation.previous[i]);
+  pending.clear();
+  todos = []; timers = []; calendar = null;
+  $('list').replaceChildren(); $('timer-list').replaceChildren();
+  renderTodos(); renderTimers();
+}
+const getToken = () => localStorage.getItem('admin_token');
+function msg(text) {
+  $('msg').textContent = text || ''; $('msg').classList.toggle('show', !!text);
+  clearTimeout(msgTimer);
+  // Errors remain visible until the next action. Successful actions dismiss naturally.
+  if (text && /✓/.test(text)) msgTimer = setTimeout(() => $('msg').classList.remove('show'), 3500);
+}
+function showScreen(name) {
+  for (const id of ['setup', 'login']) $(id + '-shell').style.display = name === id ? 'block' : 'none';
+  $('panel').style.display = name === 'panel' ? 'block' : 'none';
+}
+function showLogin(error = '') {
+  invalidateSession();
+  localStorage.removeItem('admin_token');
+  showScreen('login'); $('login-err').textContent = error;
+}
+async function request(url, opts = {}, protect = true) {
+  const stamp = sessionStamp();
+  if (protect && !authenticated) throw new Error('Sign in again to continue');
+  const headers = { ...opts.headers };
+  if (protect && getToken()) headers.Authorization = 'Bearer ' + getToken();
+  if (opts.body) headers['Content-Type'] = 'application/json';
+  let response;
+  try { response = await fetch(url, { ...opts, headers }); }
+  catch { assertSession(stamp); throw new Error('Cannot reach server — please retry'); }
+  assertSession(stamp);
+  let data;
+  try { data = await response.json(); }
+  catch { assertSession(stamp); throw new Error('Invalid server response — please retry'); }
+  assertSession(stamp);
+  if (response.status === 401 && protect) {
+    showLogin('Session expired — sign in again');
+    const error = new Error('Session expired — sign in again'); error.sessionExpired = true; throw error;
+  }
+  if (!response.ok || data?.ok === false) {
+    const error = new Error(data?.error || 'Request failed — please retry');
+    error.data = data; throw error;
+  }
+  return data;
+}
+async function mutate(group, controls, url, method, body, onSuccess, rollback) {
+  if (pending.has(group) || !authenticated) return;
+  const stamp = sessionStamp(), resource = resourceFor(group);
+  advanceResource(resource);
+  if (resource === 'calendar') advanceResource('settings');
+  const beganAt = authorityClock;
+  const operation = { controls, previous: controls.map(control => control.disabled) };
+  pending.set(group, operation);
+  controls.forEach(control => control.disabled = true);
+  msg('Saving…');
+  try {
+    const data = await request(url, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    if (!currentSession(stamp)) return;
+    const id = itemVersions[resource] ? (method === 'POST' ? data.id : group.slice(group.indexOf(':') + 1)) : null;
+    const apply = authorityVersion(resource, id) <= beganAt;
+    if (apply) { advanceResource(resource); recordAuthority(resource, id); }
+    onSuccess?.(data, apply);
+  } catch (error) {
+    if (!currentSession(stamp)) return;
+    rollback?.();
+    if (error.data?.calendar && authorityVersion('calendar') <= beganAt) commitResource('calendar', () => renderCalendar(error.data.calendar));
+    msg(error.message);
+  } finally {
+    if (currentSession(stamp) && pending.get(group) === operation) {
+      advanceResource(resource);
+      if (resource === 'calendar') advanceResource('settings');
+      pending.delete(group);
+      controls.forEach((control, i) => control.disabled = operation.previous[i]);
+      renderTodos(); renderTimers();
+    }
+  }
+}
+async function refresh() {
+  if (!authenticated) return;
+  const stamp = sessionStamp();
+  async function read(resource, url, apply, protect = true) {
+    const revision = readEpoch[resource], sequence = ++readSequence[resource];
+    const current = () => currentSession(stamp) && authenticated && readEpoch[resource] === revision && readSequence[resource] === sequence && ![...pending.keys()].some(group => resourceFor(group) === resource || resource === 'settings' && group === 'calendar');
+    try {
+      const data = await request(url, {}, protect);
+      if (current()) commitResource(resource, () => apply(data), data);
+    } catch (error) { if (current()) msg(error.message); }
+  }
+  await Promise.all([
+    read('todos', '/api/todos', renderTodos),
+    read('timers', '/api/timers', renderTimers),
+    read('time', '/api/time', renderTime, false),
+    read('settings', '/api/settings', settings => {
+      if (!calendarDirty && document.activeElement !== $('cal-ics') && !pending.has('calendar')) $('cal-ics').value = settings.icsUrl || '';
+    }),
+    read('calendar', '/api/calendar', renderCalendar, false)
+  ]);
+}
+function safeToRender(list, group) {
+  return !list.contains(document.activeElement) && ![...pending.keys()].some(key => key.startsWith(group));
+}
+function renderTodos(list = todos) {
+  todos = list;
+  const ul = $('list');
+  if (!safeToRender(ul, 'todo:')) return;
+  ul.replaceChildren();
+  if (!list.length) { const li = document.createElement('li'); li.className = 'dim'; li.textContent = 'No tasks yet'; ul.append(li); }
+  for (const task of list) {
+    const li = document.createElement('li'); li.classList.toggle('done', !!task.done);
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!task.done; cb.setAttribute('aria-label', 'Mark ' + task.text + ' done');
+    const text = document.createElement('span'); text.className = 'grow'; text.textContent = task.text;
+    const del = document.createElement('button'); del.className = 'ghost'; del.textContent = '✕'; del.setAttribute('aria-label', 'Delete task ' + task.text);
+    const update = (data, apply) => { if (apply) { renderTodos(todos.map(item => item.id === task.id ? data : item)); li.classList.toggle('done', !!data.done); } msg('Task updated ✓'); };
+    cb.onchange = () => mutate('todo:' + task.id, [cb, del], '/api/todos/' + task.id, 'PATCH', { done: cb.checked }, update, () => cb.checked = !!(todos.find(item => item.id === task.id) || task).done);
+    del.onclick = () => mutate('todo:' + task.id, [cb, del], '/api/todos/' + task.id, 'DELETE', undefined, (data, apply) => { if (apply) { renderTodos(todos.filter(item => item.id !== task.id)); li.remove(); } msg('Task deleted ✓'); });
+    li.append(cb, text, del); ul.append(li);
+  }
+}
+function renderTimers(list = timers) {
+  timers = list;
+  const ul = $('timer-list');
+  if (!safeToRender(ul, 'timer:')) return;
+  ul.replaceChildren();
+  if (!list.length) { const li = document.createElement('li'); li.className = 'dim'; li.textContent = 'No timers yet'; ul.append(li); }
+  for (const timer of list) {
+    const li = document.createElement('li'); li.dataset.timerId = timer.id; li.classList.toggle('done', !!timer.done);
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!timer.done; cb.setAttribute('aria-label', 'Mark ' + timer.name + ' done');
+    const text = document.createElement('span'); text.className = 'grow timer-description';
+    const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = timer.type === 'long' ? 'long' : 'short';
+    const color = document.createElement('input'); color.type = 'color'; color.className = 'timer-color'; color.setAttribute('aria-label', 'Color for timer ' + timer.name);
+    const confirmedColor = /^#[0-9a-fA-F]{6}$/.test(timer.color || '') ? timer.color : '#2b6cff'; color.value = confirmedColor;
+    const del = document.createElement('button'); del.className = 'ghost'; del.textContent = '✕'; del.setAttribute('aria-label', 'Delete timer ' + timer.name);
+    const update = (data, apply) => { if (apply) { renderTimers(timers.map(item => item.id === timer.id ? data : item)); li.classList.toggle('done', !!data.done); } msg('Timer updated ✓'); };
+    cb.onchange = () => mutate('timer:' + timer.id, [cb, color, del], '/api/timers/' + timer.id, 'PATCH', { done: cb.checked }, update, () => cb.checked = !!(timers.find(item => item.id === timer.id) || timer).done);
+    color.onchange = () => mutate('timer:' + timer.id, [cb, color, del], '/api/timers/' + timer.id, 'PATCH', { color: color.value }, update, () => color.value = (timers.find(item => item.id === timer.id) || timer).color || confirmedColor);
+    del.onclick = () => mutate('timer:' + timer.id, [cb, color, del], '/api/timers/' + timer.id, 'DELETE', undefined, (data, apply) => { if (apply) { renderTimers(timers.filter(item => item.id !== timer.id)); li.remove(); } msg('Timer deleted ✓'); });
+    li.append(cb, text, tag, color, del); ul.append(li);
+  }
+  tick();
 }
 function fmtDur(sec) {
+  sec = Math.max(0, Math.ceil(sec));
   const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
   return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s).padStart(2, '0');
 }
-
-document.getElementById('login-btn').onclick = doLogin;
-document.getElementById('login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
-document.getElementById('logout-btn').onclick = async () => {
-  try { await authFetch('/api/logout', { method: 'POST' }); } catch {}
-  localStorage.removeItem('admin_token');
-  showLogin();
-};
-
-document.getElementById('todo-add').onclick = async () => {
-  const el = document.getElementById('todo-text');
-  if (!el.value.trim()) return;
-  const r = await authFetch('/api/todos', { method: 'POST', body: JSON.stringify({ text: el.value }) });
-  if (!r.ok) { msg('Failed — are you logged in?'); return; }
-  el.value = ''; msg('Added ✓'); refresh();
-};
-
-/* ---- dashboard clock override ---- */
-async function refreshTime() {
+function leftText(timer) {
+  if (timer.done) return 'done';
+  if (!timer.targetAt) return timer.pausedLeftSec != null ? 'paused ' + fmtDur(timer.pausedLeftSec) : 'not set';
+  const seconds = Math.ceil((timer.targetAt - DashboardTime.now()) / 1000);
+  if (seconds <= 0) return 'finished';
+  if (timer.type === 'long' && seconds >= 86400) return `${Math.floor(seconds / 86400)}d ${Math.floor(seconds % 86400 / 3600)}h left`;
+  return fmtDur(seconds) + ' left';
+}
+function tick() {
+  const now = DashboardTime.now() + clockOffsetSec * 1000;
+  $('dash-now').textContent = `${DashboardTime.time(now, true)}  ${DashboardTime.date(now)} · ${DashboardTime.zone} ${clockOffsetSec ? '(shifted)' : '(real time)'}`;
+  for (const row of $('timer-list').children) {
+    const timer = timers.find(item => item.id === row.dataset.timerId);
+    if (timer) row.querySelector('.timer-description').textContent = `${timer.name} — ${leftText(timer)}`;
+  }
+}
+function renderTime(time) {
+  DashboardTime.setZone(time.timeZone);
+  if (Number.isFinite(time.dashboardNow)) DashboardTime.sync(time.dashboardNow - (Number(time.offsetSec) || 0) * 1000);
+  clockOffsetSec = Number(time.offsetSec) || 0; tick();
+}
+function renderCalendar(cal) {
+  calendar = cal;
+  const status = $('cal-status'), next = $('cal-next');
+  const stale = DashboardTime.stale(cal, 20 * 60000);
+  status.className = !cal?.configured || cal.error || stale ? 'data-warning' : 'ok-dot';
+  status.textContent = !cal?.configured ? 'Not connected' : cal.error ? 'Refresh failed · saved URL will retry; cached data may be stale' : stale ? 'Stale · refreshing' : 'Connected';
+  next.replaceChildren(); next.style.display = cal?.next ? 'block' : 'none';
+  if (cal?.next) {
+    const title = document.createElement('b'); title.textContent = `Next: ${cal.next.summary}`;
+    const sub = document.createElement('div'); sub.className = 'hint';
+    sub.textContent = `${cal.next.allDay ? 'All day' : DashboardTime.time(cal.next.startMs)} · ${DashboardTime.date(cal.next.startMs)}` + (cal.next.location ? ' · ' + cal.next.location : '');
+    next.append(title, sub);
+  }
+}
+function subscribe() {
+  stream?.close(); stream = new EventSource('/api/stream');
+  const stamp = sessionStamp();
+  const active = () => authenticated && currentSession(stamp);
+  const listen = (name, render) => stream.addEventListener(name, event => { if (active()) { try { render(JSON.parse(event.data)); } catch { msg('Could not read live update'); } } });
+  listen('snapshot', snapshot => {
+    DashboardTime.sync(snapshot.now); DashboardTime.setZone(snapshot.timeZone);
+    commitResource('todos', () => renderTodos(snapshot.todos), snapshot.todos);
+    commitResource('timers', () => renderTimers(snapshot.timers), snapshot.timers);
+    commitResource('time', () => renderTime(snapshot.time));
+    commitResource('calendar', () => renderCalendar(snapshot.calendar));
+  });
+  for (const [resource, render] of Object.entries({ todos: renderTodos, timers: renderTimers, time: renderTime, calendar: renderCalendar })) listen(resource, data => commitResource(resource, () => render(data), data));
+  stream.addEventListener('error', () => { if (active()) $('admin-sync').textContent = 'Server reconnecting…'; });
+  stream.addEventListener('open', () => { if (active()) $('admin-sync').textContent = 'Live updates connected'; });
+}
+function showPanel() { invalidateSession(); authenticated = true; showScreen('panel'); subscribe(); return refresh(); }
+async function authenticate(setup) {
+  const prefix = setup ? 'setup' : 'login', button = $(prefix + '-btn');
+  if (button.disabled) return;
+  const errorEl = $(prefix + '-err'); errorEl.textContent = '';
+  const user = $(prefix + '-user').value.trim(), pass = $(prefix + '-pass').value;
+  if (setup && pass !== $('setup-pass2').value) { errorEl.textContent = 'Passwords do not match'; return; }
+  button.disabled = true;
+  const stamp = sessionStamp();
   try {
-    const t = await (await fetch('/api/time')).json();
-    const d = new Date(t.dashboardNow);
-    let h = d.getHours(), m = String(d.getMinutes()).padStart(2, '0');
-    const ap = h >= 12 ? 'PM' : 'AM';
-    h = h % 12 || 12;
-    const off = t.offsetSec || 0;
-    const offTxt = off === 0 ? '(real time)' : `(shifted ${off > 0 ? '+' : ''}${Math.round(off / 3600 * 10) / 10}h)`;
-    document.getElementById('dash-now').textContent =
-      `${h}:${m} ${ap}  ${d.getDate()}-${d.getMonth() + 1}-${d.getFullYear()} ${offTxt}`;
-  } catch {}
+    const data = await request('/api/' + prefix, { method: 'POST', body: JSON.stringify({ user, pass }) }, false);
+    if (!currentSession(stamp)) return;
+    button.disabled = false;
+    localStorage.setItem('admin_token', data.token);
+    $(prefix + '-pass').value = ''; if (setup) $('setup-pass2').value = '';
+    await showPanel();
+  } catch (error) { if (currentSession(stamp)) errorEl.textContent = error.message; }
+  finally { if (currentSession(stamp)) button.disabled = false; }
 }
-document.getElementById('time-set').onclick = async () => {
-  const v = document.getElementById('tm-datetime').value;
-  if (!v) { msg('Pick a date + time first'); return; }
-  const r = await authFetch('/api/time', { method: 'POST', body: JSON.stringify({ datetime: v }) });
-  if (!r.ok) { msg((await r.json()).error || 'Failed'); return; }
-  msg('Dashboard time set ✓'); refreshTime();
+$('setup-btn').onclick = () => authenticate(true);
+$('login-btn').onclick = () => authenticate(false);
+for (const id of ['login-user', 'login-pass', 'setup-user', 'setup-pass', 'setup-pass2']) $(id).addEventListener('keydown', event => { if (event.key === 'Enter') authenticate(id.startsWith('setup') ); });
+$('logout-btn').onclick = async () => {
+  await mutate('logout', [$('logout-btn')], '/api/logout', 'POST', undefined, () => { showLogin(); msg('Signed out ✓'); });
 };
-document.getElementById('time-reset').onclick = async () => {
-  await authFetch('/api/time', { method: 'POST', body: JSON.stringify({ action: 'reset' }) });
-  msg('Back to real time ✓'); refreshTime();
+$('todo-add').onclick = () => {
+  const draft = $('todo-text').value;
+  if (!draft.trim()) { msg('Enter a task first'); return; }
+  return mutate('todo:add', [$('todo-add')], '/api/todos', 'POST', { text: draft }, (data, apply) => {
+    if ($('todo-text').value === draft) $('todo-text').value = '';
+    if (apply) renderTodos([...todos.filter(item => item.id !== data.id), data]); msg('Added ✓');
+  });
 };
-
-/* ---- google calendar (private ICS url) ---- */
-async function refreshCal() {
-  try {
-    const s = await authFetch('/api/settings');
-    if (!s.ok) return;
-    const set = await s.json();
-    const inp = document.getElementById('cal-ics');
-    if (document.activeElement !== inp) inp.value = set.icsUrl || '';
-    const cal = await (await fetch('/api/calendar')).json();
-    const st = document.getElementById('cal-status');
-    const nx = document.getElementById('cal-next');
-    if (!set.icsUrl) {
-      st.innerHTML = '<span class="bad-dot">●</span> not connected';
-      nx.style.display = 'none';
-    } else if (cal.error && !cal.next) {
-      st.textContent = '';
-      st.appendChild(Object.assign(document.createElement('span'), { className: 'bad-dot', textContent: '●' }));
-      st.appendChild(document.createTextNode(' error — will retry'));
-      nx.style.display = 'none';
-    } else {
-      st.innerHTML = '<span class="ok-dot">●</span> connected';
-      if (cal.next) {
-        const d = new Date(cal.next.startMs);
-        let h = d.getHours(), m = String(d.getMinutes()).padStart(2, '0');
-        const ap = h >= 12 ? 'PM' : 'AM';
-        h = h % 12 || 12;
-        const today = new Date();
-        const ds = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
-        const todays = (cal.upcoming || []).filter(e => e.startMs < ds + 86400000 && e.endMs > ds).length;
-        nx.style.display = 'block';
-        nx.innerHTML = '';
-        const b = document.createElement('b');
-        b.textContent = `Next: ${cal.next.summary}`;
-        const sub = document.createElement('div');
-        sub.className = 'hint';
-        sub.textContent = `${h}:${m} ${ap} · ${d.getDate()}-${d.getMonth() + 1}-${d.getFullYear()}` +
-          (cal.next.location ? ` · ${cal.next.location}` : '') +
-          (todays > 1 ? ` · +${todays - 1} more today` : todays === 1 ? ' · only event today' : '');
-        nx.append(b, sub);
-      } else nx.style.display = 'none';
-    }
-  } catch {}
+$('todo-text').addEventListener('keydown', event => { if (event.key === 'Enter') $('todo-add').onclick(); });
+const timeControls = [$('time-set'), $('time-reset')];
+$('time-set').onclick = () => {
+  const datetime = $('tm-datetime').value;
+  if (!datetime) { msg('Pick a date + time first'); return; }
+  return mutate('time', timeControls, '/api/time', 'POST', { datetime }, (data, apply) => { if (apply) renderTime(data); msg('Dashboard time set ✓'); });
+};
+$('time-reset').onclick = () => mutate('time', timeControls, '/api/time', 'POST', { action: 'reset' }, (data, apply) => { if (apply) renderTime(data); msg('Back to real time ✓'); });
+const calendarControls = [$('cal-save'), $('cal-clear')];
+$('cal-ics').addEventListener('input', () => calendarDirty = true);
+$('cal-save').onclick = () => {
+  const draft = $('cal-ics').value;
+  if (!draft.trim()) { msg('Paste the ICS URL first'); return; }
+  calendarDirty = true;
+  return mutate('calendar', calendarControls, '/api/settings', 'POST', { icsUrl: draft.trim() }, (data, apply) => {
+    if ($('cal-ics').value === draft) calendarDirty = false;
+    if (apply) renderCalendar(data.calendar); msg('Calendar connected ✓');
+  });
+};
+$('cal-clear').onclick = () => {
+  const draft = $('cal-ics').value;
+  return mutate('calendar', calendarControls, '/api/settings', 'POST', { icsUrl: '' }, (data, apply) => {
+    if ($('cal-ics').value === draft) { $('cal-ics').value = ''; calendarDirty = false; }
+    if (apply) renderCalendar(data.calendar); msg('Calendar disconnected ✓');
+  });
+};
+function setTimerType(type) {
+  for (const value of ['long', 'short']) {
+    $('type-' + value).classList.toggle('on', value === type);
+    $('type-' + value).setAttribute('aria-pressed', value === type ? 'true' : 'false');
+    $(value + '-inputs').style.display = value === type ? 'block' : 'none';
+  }
 }
-document.getElementById('cal-save').onclick = async () => {
-  const v = document.getElementById('cal-ics').value.trim();
-  if (!v) { msg('Paste the ICS URL first'); return; }
-  const r = await authFetch('/api/settings', { method: 'POST', body: JSON.stringify({ icsUrl: v }) });
-  if (!r.ok) { msg((await r.json()).error || 'Failed'); return; }
-  msg('Calendar connected ✓'); refreshCal();
-};
-document.getElementById('cal-clear').onclick = async () => {
-  await authFetch('/api/settings', { method: 'POST', body: JSON.stringify({ icsUrl: '' }) });
-  document.getElementById('cal-ics').value = '';
-  msg('Calendar disconnected'); refreshCal();
-};
-let timerType = 'long';
-const typeLongBtn = document.getElementById('type-long');
-const typeShortBtn = document.getElementById('type-short');
-function setTimerType(t) {
-  timerType = t;
-  typeLongBtn.classList.toggle('on', t === 'long');
-  typeShortBtn.classList.toggle('on', t === 'short');
-  document.getElementById('long-inputs').style.display = t === 'long' ? 'block' : 'none';
-  document.getElementById('short-inputs').style.display = t === 'short' ? 'block' : 'none';
+$('type-long').onclick = () => setTimerType('long'); $('type-short').onclick = () => setTimerType('short');
+const timerButtons = ['tm-long-set', 'tm-date-set', 'tm-short-start', 'tm-at-start'].map($);
+function createTimer(button, fields) {
+  const name = $('tm-name').value.trim();
+  if (!name) { msg('Give the timer a name first'); return; }
+  if (Object.values(fields).some(value => value === '')) { msg('Enter the timer date or time first'); return; }
+  return mutate('timer:create', timerButtons, '/api/timers', 'POST', { name, color: $('tm-color').value, ...fields }, (data, apply) => {
+    if (apply) renderTimers([...timers.filter(item => item.id !== data.id), data]); msg('Timer created ✓');
+  });
 }
-typeLongBtn.onclick = () => setTimerType('long');
-typeShortBtn.onclick = () => setTimerType('short');
-
-function timerName() {
-  const el = document.getElementById('tm-name');
-  if (!el.value.trim()) { msg('Give the timer a name first'); return null; }
-  return el.value.trim();
+$('tm-long-set').onclick = () => createTimer('tm-long-set', { type: 'long', days: $('tm-days').value });
+$('tm-date-set').onclick = () => createTimer('tm-date-set', { type: 'long', date: $('tm-date').value });
+$('tm-short-start').onclick = () => createTimer('tm-short-start', { type: 'short', hours: $('tm-h').value, mins: $('tm-m').value });
+$('tm-at-start').onclick = () => createTimer('tm-at-start', { type: 'short', atTime: $('tm-at').value });
+for (const [id, render] of [['list', renderTodos], ['timer-list', renderTimers]]) {
+  $(id).addEventListener('focusout', () => { const stamp = sessionStamp(); setTimeout(() => { if (currentSession(stamp)) render(); }, 0); });
 }
-function timerColor() { return document.getElementById('tm-color').value; }
-document.getElementById('tm-long-set').onclick = async () => {
-  const name = timerName(); if (!name) return;
-  const days = Number(document.getElementById('tm-days').value || 0);
-  const r = await authFetch('/api/timers', { method: 'POST', body: JSON.stringify({ name, type: 'long', days, color: timerColor() }) });
-  if (!r.ok) { msg((await r.json()).error || 'Failed'); return; }
-  msg(`"${name}" set ✓`); refreshTimers();
-};
-document.getElementById('tm-date-set').onclick = async () => {
-  const name = timerName(); if (!name) return;
-  const date = document.getElementById('tm-date').value;
-  if (!date) { msg('Pick a date first'); return; }
-  const r = await authFetch('/api/timers', { method: 'POST', body: JSON.stringify({ name, type: 'long', date, color: timerColor() }) });
-  if (!r.ok) { msg((await r.json()).error || 'Failed'); return; }
-  msg(`"${name}" set ✓`); refreshTimers();
-};
-document.getElementById('tm-short-start').onclick = async () => {
-  const name = timerName(); if (!name) return;
-  const r = await authFetch('/api/timers', { method: 'POST', body: JSON.stringify({
-    name, type: 'short', color: timerColor(),
-    hours: Number(document.getElementById('tm-h').value || 0),
-    mins: Number(document.getElementById('tm-m').value || 0)
-  }) });
-  if (!r.ok) { msg((await r.json()).error || 'Failed'); return; }
-  msg(`"${name}" started ✓`); refreshTimers();
-};
-document.getElementById('tm-at-start').onclick = async () => {
-  const name = timerName(); if (!name) return;
-  const atTime = document.getElementById('tm-at').value;
-  if (!atTime) { msg('Pick a time first'); return; }
-  const r = await authFetch('/api/timers', { method: 'POST', body: JSON.stringify({ name, type: 'short', atTime, color: timerColor() }) });
-  if (!r.ok) { msg((await r.json()).error || 'Failed'); return; }
-  msg(`"${name}" counts down to ${atTime} ✓`); refreshTimers();
-};
-
-// Boot: setup -> login -> panel.
+setInterval(() => { if (authenticated) { tick(); if (calendar) renderCalendar(calendar); } }, 1000);
+setInterval(refresh, 30000);
+// Deferred list reconciliation never replaces an in-flight or focused control.
+setInterval(() => { if (authenticated) { renderTodos(); renderTimers(); } }, 2000);
 (async () => {
-  let me = { loggedIn: false, needsSetup: false };
+  const stamp = sessionStamp();
   try {
-    const token = getToken();
-    const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
-    me = await (await fetch('/api/me', { headers })).json();
-  } catch { return showLogin('Cannot reach server'); }
-  if (me.needsSetup) return showSetup();
-  if (me.loggedIn) return showPanel();
-  // No valid session. If login says setup is needed (fresh DB), show setup.
-  try {
-    const r = await fetch('/api/login', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user: '', pass: '' })
-    });
-    const j = await r.json();
-    if (j.needsSetup) return showSetup();
-  } catch {}
-  showLogin();
+    const headers = getToken() ? { Authorization: 'Bearer ' + getToken() } : {};
+    const me = await request('/api/me', { headers }, false);
+    if (!currentSession(stamp)) return;
+    if (me.needsSetup) { showScreen('setup'); return; }
+    if (me.loggedIn) { await showPanel(); return; }
+    showLogin();
+  } catch (error) { if (currentSession(stamp)) showLogin(error.message); }
 })();

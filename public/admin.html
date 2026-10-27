@@ -67,6 +67,39 @@
   details.howto summary{cursor:pointer;color:#8ab4ff}
   details.howto ol{margin:8px 0;padding-left:20px}
   .ok-dot{color:var(--good)} .bad-dot{color:var(--bad)}
+
+  .field{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1}
+  .field>label{font-size:12px;color:var(--dim);text-align:left;line-height:1.35}
+  .field>input{width:100%;min-width:0}
+  .row>.field{flex:1;min-width:0}
+  .row>button{align-self:flex-end}
+  #login-card .field,#setup-card .field{margin:12px 0}
+  #login-card .field>input,#setup-card .field>input{margin:0}
+  #panel .card{overflow:visible;min-width:0}
+  .appbar{margin:0;flex-wrap:wrap}
+  .appbar .brand{min-width:120px}
+  .appbar .brand small{font-size:11px}
+  ul.items .grow{overflow:visible;overflow-wrap:anywhere;white-space:normal}
+  ul.items li{flex-wrap:wrap;gap:8px}
+  ul.items .grow{flex-basis:130px}
+  .timer-color{flex:none;width:44px;height:44px;padding:3px;cursor:pointer}
+  input[type="checkbox"]{width:24px;height:24px;margin:10px}
+  input,button,.btn-link,details summary{min-height:44px}
+  input[type="date"],input[type="time"],input[type="datetime-local"]{max-width:100%;width:100%}
+  button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid #8ab4ff;outline-offset:3px}
+  #msg{overflow-wrap:anywhere}
+  @media(max-width:480px){
+    .shell{padding:14px 10px 70px}
+    #panel .card{padding:16px}
+    .appbar{padding:12px 10px;gap:5px}
+    .appbar .brand{font-size:17px}
+    .btn-link{padding:9px}
+    input,button{font-size:16px;padding:10px}
+    ul.items li{padding:8px 0}
+    ul.items .tag{display:none}
+    ul.items .grow{flex-basis:100px}
+    #login-card,#setup-card{padding:24px;margin-top:5vh}
+  }
 </style>
 </head>
 <body>
@@ -77,11 +110,11 @@
     <div class="icon">👋</div>
     <h1>Welcome</h1>
     <p class="hint">Create your admin account to control the dashboard</p>
-    <input id="setup-user" placeholder="Choose a username" autocomplete="username" />
-    <input id="setup-pass" type="password" placeholder="Choose a password (min 6 chars)" autocomplete="new-password" />
-    <input id="setup-pass2" type="password" placeholder="Repeat password" autocomplete="new-password" />
+    <span class="field"><label for="setup-user">Username</label><input id="setup-user" placeholder="Choose a username" autocomplete="username" /></span>
+    <span class="field"><label for="setup-pass">Password (minimum 6 characters)</label><input id="setup-pass" type="password" placeholder="Choose a password (min 6 chars)" autocomplete="new-password" /></span>
+    <span class="field"><label for="setup-pass2">Repeat password</label><input id="setup-pass2" type="password" placeholder="Repeat password" autocomplete="new-password" /></span>
     <button id="setup-btn">Create account</button>
-    <p id="setup-err"></p>
+    <p id="setup-err" role="alert"></p>
     <p><a class="btn-link" href="/">← back to display</a></p>
   </div>
 </div>
@@ -92,10 +125,10 @@
     <div class="icon">🔒</div>
     <h1>Admin</h1>
     <p class="hint">Sign in to control the dashboard</p>
-    <input id="login-user" placeholder="Username" autocomplete="username" />
-    <input id="login-pass" type="password" placeholder="Password" autocomplete="current-password" />
+    <span class="field"><label for="login-user">Username</label><input id="login-user" placeholder="Username" autocomplete="username" /></span>
+    <span class="field"><label for="login-pass">Password</label><input id="login-pass" type="password" placeholder="Password" autocomplete="current-password" /></span>
     <button id="login-btn">Sign in</button>
-    <p id="login-err"></p>
+    <p id="login-err" role="alert"></p>
     <p><a class="btn-link" href="/">← back to display</a></p>
   </div>
 </div>
@@ -103,7 +136,7 @@
 <!-- Control panel -->
 <div id="panel">
   <div class="appbar">
-    <div class="brand">🎛 Control<small>tablet dashboard</small></div>
+    <div class="brand">🎛 Control<small id="admin-sync" role="status">Connecting live updates…</small></div>
     <a class="btn-link" href="/">📺 Display</a>
     <button id="logout-btn" class="ghost">Log out</button>
   </div>
@@ -114,7 +147,7 @@
         <div class="icon">✅</div>
         <h2>To-Do</h2>
         <p class="hint">Shows top 5 unchecked on the tablet</p>
-        <div class="row"><input id="todo-text" placeholder="New task…" /><button id="todo-add">Add</button></div>
+        <div class="row"><span class="field"><label for="todo-text">New task</label><input id="todo-text" placeholder="New task…" /></span><button id="todo-add">Add</button></div>
         <ul class="items" id="list"></ul>
       </section>
 
@@ -122,23 +155,23 @@
         <div class="icon">⏱</div>
         <h2>New timer</h2>
         <p class="hint">Every timer has a name — long counts days, short counts today</p>
-        <div class="row"><input id="tm-name" placeholder="Timer name (e.g. Exams, Gym)…" /></div>
-        <div class="row"><input id="tm-color" type="color" value="#2b6cff" title="Timer color" style="flex:none;width:56px;padding:4px;cursor:pointer" /><span class="hint" style="align-self:center">Timer color</span></div>
+        <div class="row"><span class="field"><label for="tm-name">Timer name</label><input id="tm-name" placeholder="Timer name (e.g. Exams, Gym)…" /></span></div>
+        <div class="row"><label class="sr-only" for="tm-color">Timer color</label><input id="tm-color" type="color" value="#2b6cff" title="Timer color" style="flex:none;width:56px;padding:4px;cursor:pointer" /><span class="hint" style="align-self:center">Timer color</span></div>
         <div class="seg">
-          <button id="type-long" class="ghost on">📅 Long · days</button>
-          <button id="type-short" class="ghost">⏱ Short · today</button>
+          <button id="type-long" class="ghost on" aria-pressed="true">📅 Long · days</button>
+          <button id="type-short" class="ghost" aria-pressed="false">⏱ Short · today</button>
         </div>
         <div id="long-inputs">
-          <div class="row"><input id="tm-days" type="number" value="12" min="1" placeholder="days from now" /><button id="tm-long-set">Set</button></div>
-          <div class="row"><input id="tm-date" type="date" /><button id="tm-date-set">Set date</button></div>
+          <div class="row"><span class="field"><label for="tm-days">Days from now</label><input id="tm-days" type="number" value="12" min="1" placeholder="days from now" /></span><button id="tm-long-set">Set</button></div>
+          <div class="row"><span class="field"><label for="tm-date">Target date</label><input id="tm-date" type="date" /></span><button id="tm-date-set">Set date</button></div>
         </div>
         <div id="short-inputs" style="display:none">
           <div class="row">
-            <input id="tm-h" type="number" value="0" min="0" max="12" placeholder="hours" />
-            <input id="tm-m" type="number" value="25" min="0" max="600" placeholder="mins" />
+            <span class="field"><label for="tm-h">Hours</label><input id="tm-h" type="number" value="0" min="0" max="12" placeholder="hours" /></span>
+            <span class="field"><label for="tm-m">Minutes</label><input id="tm-m" type="number" value="25" min="0" max="600" placeholder="mins" /></span>
             <button id="tm-short-start">Start</button>
           </div>
-          <div class="row"><input id="tm-at" type="time" /><button id="tm-at-start">At time</button></div>
+          <div class="row"><span class="field"><label for="tm-at">Target time</label><input id="tm-at" type="time" /></span><button id="tm-at-start">At time</button></div>
         </div>
       </section>
 
@@ -154,7 +187,7 @@
         <h2>Dashboard time</h2>
         <p class="hint">Shifts only the kiosk clock — timers keep real time</p>
         <div class="now-line">Now showing: <b id="dash-now">—</b></div>
-        <div class="row"><input id="tm-datetime" type="datetime-local" /><button id="time-set">Set</button></div>
+        <div class="row"><span class="field"><label for="tm-datetime">Dashboard date and time</label><input id="tm-datetime" type="datetime-local" /></span><button id="time-set">Set</button></div>
         <div class="row"><button id="time-reset" class="ghost">Reset to real time</button></div>
       </section>
 
@@ -162,7 +195,7 @@
         <div class="icon">📅</div>
         <h2>Google Calendar</h2>
         <p class="hint">Tablet shows your next event · <span id="cal-status"><span class="bad-dot">●</span> not connected</span></p>
-        <div class="row"><input id="cal-ics" placeholder="Paste private ICS / iCal URL…" /><button id="cal-save">Connect</button></div>
+        <div class="row"><span class="field"><label for="cal-ics">Private calendar ICS URL</label><input id="cal-ics" placeholder="Paste private ICS / iCal URL…" /></span><button id="cal-save">Connect</button></div>
         <div class="row"><button id="cal-clear" class="ghost">Disconnect</button></div>
         <div class="now-line" id="cal-next" style="display:none"></div>
         <details class="howto">
@@ -179,7 +212,8 @@
   </div>
 </div>
 
-<div id="msg"></div>
+<div id="msg" role="status" aria-live="polite" aria-atomic="true"></div>
+<script src="js/common.js"></script>
 <script src="js/admin.js"></script>
 </body>
 </html>
