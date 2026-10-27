@@ -5,9 +5,16 @@ const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 const ics = require('./lib/ics');
+const { createStore } = require('./lib/storage');
+const time = require('./lib/time');
+
+function createDashboard({ dataDir, fetchImpl = fetch, background = false } = {}) {
 
 // ---- Config ----
-const PORT = process.env.PORT || 1200;
+const TIME_ZONE = process.env.APP_TIMEZONE || 'Africa/Cairo';
+new Intl.DateTimeFormat('en', { timeZone: TIME_ZONE });
+const intervals = [];
+function every(fn, delay) { intervals.push(setInterval(fn, delay)); }
 // Optional legacy fallback login — ONLY active when both vars are explicitly set.
 // (Removed from compose/.env.example so first-boot setup page is the normal path.)
 const ENV_ADMIN_USER = process.env.ADMIN_USER || null;
@@ -21,7 +28,7 @@ app.use(cors());
 app.use(express.json({ limit: '256kb' }));
 
 // ---- Tiny JSON file DB (no native deps, Docker + Windows friendly) ----
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+const DATA_DIR = dataDir || process.env.DATA_DIR || path.join(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 
@@ -36,8 +43,8 @@ function defaultDb() {
       { id: 'long1', name: 'Long term', type: 'long', targetAt: Date.now() + 12 * 24 * 3600 * 1000, createdAt: Date.now(), done: false, pausedLeftSec: null }
     ],
     pc: {
-      cpu: 0, ram: 0, gpu: 0, gpuTemp: null, cpuTemp: null,
-      uptimeSec: 0, disks: [], updatedAt: 0
+      cpu: null, ram: null, gpu: null, gpuTemp: null, cpuTemp: null,
+      uptimeSec: null, disks: [], updatedAt: 0
     },
     weather: { temp: null, code: null, label: '—', updatedAt: 0 },
     time: { offsetSec: 0, updatedAt: 0 }, // dashboard clock = real time + offset (set from /admin)
@@ -47,21 +54,18 @@ function defaultDb() {
   };
 }
 
-function loadDb() {
-  try {
-    if (fs.existsSync(DB_FILE)) return JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-  } catch (e) { console.error('db load failed, resetting', e.message); }
-  const d = defaultDb();
-  fs.writeFileSync(DB_FILE, JSON.stringify(d, null, 2));
-  return d;
+const store = createStore(DB_FILE, defaultDb);
+let db = store.value;
+let migrated = false;
+for (const key of ['todos', 'timers', 'pc', 'weather']) {
+  if (!(key in db)) { db[key] = defaultDb()[key]; migrated = true; }
 }
-let db = loadDb();
 // migrate old db.json files that predate users[]
-if (!Array.isArray(db.users)) { db.users = []; saveDb(); }
-if (!db.time || typeof db.time.offsetSec !== 'number') { db.time = { offsetSec: 0, updatedAt: 0 }; saveDb(); }
-if (!db.settings || typeof db.settings.icsUrl !== 'string') { db.settings = { icsUrl: '' }; saveDb(); }
-if (!db.calendar || typeof db.calendar !== 'object') { db.calendar = { next: null, upcoming: [], updatedAt: 0, error: null, configured: false }; saveDb(); }
-if (!Array.isArray(db.calendar.upcoming)) { db.calendar.upcoming = []; saveDb(); }
+if (!Array.isArray(db.users)) { db.users = []; migrated = true; }
+if (!db.time || typeof db.time.offsetSec !== 'number') { db.time = { offsetSec: 0, updatedAt: 0 }; migrated = true; }
+if (!db.settings || typeof db.settings.icsUrl !== 'string') { db.settings = { icsUrl: '' }; migrated = true; }
+if (!db.calendar || typeof db.calendar !== 'object') { db.calendar = { next: null, upcoming: [], updatedAt: 0, error: null, configured: false }; migrated = true; }
+if (!Array.isArray(db.calendar.upcoming)) { db.calendar.upcoming = []; migrated = true; }
 // migrate old single long/short timer object -> named timers array
 if (db.timers && !Array.isArray(db.timers)) {
   const arr = [];
@@ -79,12 +83,29 @@ if (db.timers && !Array.isArray(db.timers)) {
       createdAt: Date.now(), done: false, pausedLeftSec: old.short.endsAt ? null : left
     });
   }
-  db.timers = arr; saveDb();
+  db.timers = arr; migrated = true;
 }
-function saveDb() {
-  fs.writeFile(DB_FILE, JSON.stringify(db, null, 2), () => {});
+function saveDb() { return store.save(db); }
+let mutationQueue = Promise.resolve();
+function transaction(fn) {
+  const result = mutationQueue.then(async () => {
+    const previous = JSON.parse(JSON.stringify(db));
+    try { return await fn(); }
+    catch (e) {
+      // Telemetry and cached external data can change while a durable write runs.
+      const {pc,weather,calendar} = db;
+      db = { ...previous, pc, weather, calendar };
+      throw e;
+    }
+  });
+  mutationQueue = result.catch(() => {});
+  return result;
 }
-setInterval(saveDb, 15 * 1000);
+function mutation(handler) {
+  return (req,res,next) => transaction(() => handler(req,res,next)).catch(next);
+}
+const ready = migrated ? saveDb() : Promise.resolve();
+app.use((req,res,next) => ready.then(() => next(), next));
 
 // ---- SSE clients ----
 const sseClients = new Set();
@@ -113,7 +134,7 @@ function verifyUser(user, pass) {
   const u = (db.users || []).find(x => x.user === String(user));
   if (u) return checkPass(pass, u.salt, u.hash);
   // env fallback only when explicitly configured (never the old hardcoded default)
-  if (ENV_ADMIN_USER && ENV_ADMIN_PASS) return user === ENV_ADMIN_USER && pass === ENV_ADMIN_PASS;
+  if (!(db.users || []).length && ENV_ADMIN_USER && ENV_ADMIN_PASS) return user === ENV_ADMIN_USER && pass === ENV_ADMIN_PASS;
   return false;
 }
 function needsSetup() { return (db.users || []).length === 0; }
@@ -158,7 +179,7 @@ app.get('/admin', (req, res) => {
 });
 
 // ---- First-boot setup + login / logout / me ----
-app.post('/api/setup', (req, res) => {
+app.post('/api/setup', mutation(async (req, res) => {
   if (!needsSetup()) return res.status(403).json({ error: 'Admin already exists' });
   const user = String(req.body.user || '').trim().slice(0, 32);
   const pass = String(req.body.pass || '');
@@ -166,12 +187,12 @@ app.post('/api/setup', (req, res) => {
   if (pass.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
   const { salt, hash } = hashPass(pass);
   db.users.push({ user, salt, hash, createdAt: Date.now() });
-  saveDb();
+  await saveDb();
   const token = issueToken();
   res.json({ ok: true, token, expiresInSec: Math.round(SESSION_TTL / 1000) });
-});
+}));
 app.post('/api/login', (req, res) => {
-  if (needsSetup()) return res.status(403).json({ error: 'No admin yet — create one first', needsSetup: true });
+  if (needsSetup() && !(ENV_ADMIN_USER && ENV_ADMIN_PASS)) return res.status(403).json({ error: 'No admin yet — create one first', needsSetup: true });
   const { user, pass } = req.body || {};
   if (verifyUser(user, pass)) {
     const token = issueToken();
@@ -212,22 +233,25 @@ app.get('/api/stream', (req, res) => {
 });
 
 function snapshot() {
-  return { now: Date.now(), pc: db.pc, todos: db.todos, timers: db.timers, weather: db.weather, time: db.time, calendar: db.calendar };
+  return { now: Date.now(), timeZone: TIME_ZONE, pc: db.pc, todos: db.todos, timers: db.timers, weather: weatherState(), time: db.time, calendar: calendarState() };
 }
 app.get('/api/snapshot', (req, res) => res.json(snapshot()));
 
 // ---- PC stats: agent POSTs here every ~2s ----
 app.post('/api/pc', (req, res) => {
   const b = req.body || {};
+  const nullable = (value,min,max) => typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max ? value : null;
+  const disks = (Array.isArray(b.disks) ? b.disks : []).filter(d => d && typeof d === 'object' && typeof d.mount === 'string' && d.mount.trim() && nullable(d.pct,0,100) !== null).slice(0,8).map(d => ({
+    mount:d.mount.slice(0,200),pct:d.pct,freeGb:nullable(d.freeGb,0,Number.MAX_VALUE),totalGb:nullable(d.totalGb,0,Number.MAX_VALUE)
+  }));
+  const capabilities = {};
+  if (b.capabilities && typeof b.capabilities === 'object') for (const [key,value] of Object.entries(b.capabilities).slice(0,32)) {
+    if (/^[a-zA-Z][a-zA-Z0-9_]{0,40}$/.test(key) && typeof value === 'boolean') capabilities[key] = value;
+  }
   db.pc = {
-    cpu: num(b.cpu, 0),
-    ram: num(b.ram, 0),
-    gpu: num(b.gpu, 0),
-    gpuTemp: b.gpuTemp ?? null,
-    cpuTemp: b.cpuTemp ?? null,
-    uptimeSec: num(b.uptimeSec, 0),
-    disks: Array.isArray(b.disks) ? b.disks.slice(0, 8) : db.pc.disks,
-    updatedAt: Date.now()
+    cpu:nullable(b.cpu,0,100),ram:nullable(b.ram,0,100),gpu:nullable(b.gpu,0,100),
+    gpuTemp:nullable(b.gpuTemp,-100,250),cpuTemp:nullable(b.cpuTemp,-100,250),
+    uptimeSec:nullable(b.uptimeSec,0,Number.MAX_SAFE_INTEGER),disks,capabilities,updatedAt:Date.now()
   };
   // lightweight: don't fsync every 2s, just broadcast
   broadcast('pc', db.pc);
@@ -237,28 +261,28 @@ app.get('/api/pc', (req, res) => res.json(db.pc));
 
 // ---- Todos ----
 app.get('/api/todos', (req, res) => res.json(db.todos));
-app.post('/api/todos', adminAuth, (req, res) => {
+app.post('/api/todos', adminAuth, mutation(async (req, res) => {
   const text = String(req.body.text || '').trim().slice(0, 200);
   if (!text) return res.status(400).json({ error: 'text required' });
-  const item = { id: String(Date.now()), text, done: false, createdAt: Date.now() };
+  const item = { id: crypto.randomUUID(), text, done: false, createdAt: Date.now() };
+  if (db.todos.length >= 50) return res.status(409).json({ error: 'Task limit reached (50); delete an item first' });
   db.todos.unshift(item);
-  db.todos = db.todos.slice(0, 50);
-  saveDb(); broadcast('todos', db.todos);
+  await saveDb(); broadcast('todos', db.todos);
   res.json(item);
-});
-app.patch('/api/todos/:id', adminAuth, (req, res) => {
+}));
+app.patch('/api/todos/:id', adminAuth, mutation(async (req, res) => {
   const t = db.todos.find(x => x.id === req.params.id);
   if (!t) return res.status(404).json({ error: 'not found' });
   if (typeof req.body.done === 'boolean') t.done = req.body.done;
   if (typeof req.body.text === 'string') t.text = req.body.text.slice(0, 200);
-  saveDb(); broadcast('todos', db.todos);
+  await saveDb(); broadcast('todos', db.todos);
   res.json(t);
-});
-app.delete('/api/todos/:id', adminAuth, (req, res) => {
+}));
+app.delete('/api/todos/:id', adminAuth, mutation(async (req, res) => {
   db.todos = db.todos.filter(x => x.id !== req.params.id);
-  saveDb(); broadcast('todos', db.todos);
+  await saveDb(); broadcast('todos', db.todos);
   res.json({ ok: true });
-});
+}));
 
 // ---- Timers (multiple, each with a name) ----
 // Timer: { id, name, type: 'long'|'short', targetAt|null, createdAt, done, pausedLeftSec|null }
@@ -276,42 +300,35 @@ function cleanColor(c) {
   return /^#[0-9a-fA-F]{6}$/.test(String(c || '')) ? String(c) : null;
 }
 app.get('/api/timers', (req, res) => res.json(sortTimers(db.timers || [])));
-app.post('/api/timers', adminAuth, (req, res) => {
+app.post('/api/timers', adminAuth, mutation(async (req, res) => {
   const b = req.body || {};
   const name = String(b.name || '').trim().slice(0, 60);
   if (!name) return res.status(400).json({ error: 'name required' });
+  if (b.type !== undefined && !['short','long'].includes(b.type)) return res.status(400).json({ error: 'Invalid timer type' });
   const type = b.type === 'short' ? 'short' : 'long';
   let targetAt = null;
   const extra = {};
-  if (type === 'long') {
-    if (b.targetAt) targetAt = Number(b.targetAt);
-    else if (b.date) { const t = new Date(b.date).getTime(); if (Number.isFinite(t)) targetAt = t; }
-    else if (b.days) targetAt = Date.now() + Number(b.days) * 24 * 3600 * 1000;
-    if (!targetAt || !Number.isFinite(targetAt)) return res.status(400).json({ error: 'days, date or targetAt required' });
-  } else {
-    if (b.atTime && /^\d{1,2}:\d{2}$/.test(String(b.atTime))) {
-      // clock time today (Africa/Cairo wall clock approximated via server local time)
-      const [hh, mm] = String(b.atTime).split(':').map(Number);
-      const d = new Date(); d.setHours(hh, mm, 0, 0);
-      targetAt = d.getTime();
-      if (targetAt <= Date.now()) targetAt += 24 * 3600 * 1000; // passed -> tomorrow
-    } else {
-      const h = Number(b.hours || 0), m = Number(b.mins || 0);
-      const dur = Math.max(60, h * 3600 + m * 60);
-      if (!Number.isFinite(dur)) return res.status(400).json({ error: 'hours/mins or atTime required' });
-      targetAt = Date.now() + dur * 1000;
-      extra.durationSec = Math.round(dur);
-    }
-  }
+  try {
+    if (type === 'long') targetAt = longTarget(b);
+    else if (b.atTime !== undefined) targetAt = time.nextClock(b.atTime, TIME_ZONE);
+    else { extra.durationSec = time.duration(b); targetAt = time.durationTarget(extra.durationSec); }
+  } catch (e) { return res.status(400).json({ error: e.message }); }
   const t = { id: makeTimerId(), name, type, targetAt, createdAt: Date.now(), done: false, pausedLeftSec: null, color: cleanColor(b.color), ...extra };
-  db.timers = [...(db.timers || []), t].slice(-20);
-  saveDb(); broadcast('timers', sortTimers(db.timers));
+  if (db.timers.length >= 20) return res.status(409).json({ error: 'Timer limit reached (20); delete an item first' });
+  db.timers.push(t);
+  await saveDb(); broadcast('timers', sortTimers(db.timers));
   res.json(t);
-});
-app.patch('/api/timers/:id', adminAuth, (req, res) => {
-  const t = (db.timers || []).find(x => x.id === req.params.id);
-  if (!t) return res.status(404).json({ error: 'not found' });
+}));
+app.patch('/api/timers/:id', adminAuth, mutation(async (req, res) => {
+  const timerIndex = (db.timers || []).findIndex(x => x.id === req.params.id);
+  if (timerIndex < 0) return res.status(404).json({ error: 'not found' });
+  // Stage edits so a rejected action cannot leak partial changes into memory
+  // or an unrelated later save.
+  const t = { ...db.timers[timerIndex] };
   const b = req.body || {};
+  if (b.action === 'restart' && (b.hours !== undefined || b.mins !== undefined)) {
+    try { time.duration(b); } catch(e) { return res.status(400).json({ error: e.message }); }
+  }
   if (typeof b.name === 'string' && b.name.trim()) t.name = b.name.trim().slice(0, 60);
   if (typeof b.done === 'boolean') t.done = b.done;
   if (typeof b.color !== 'undefined') t.color = cleanColor(b.color);
@@ -324,41 +341,43 @@ app.patch('/api/timers/:id', adminAuth, (req, res) => {
     t.targetAt = null; t.pausedLeftSec = null; t.done = false;
   } else if (b.action === 'restart' && t.targetAt == null && t.pausedLeftSec == null) {
     // re-arm a finished short with its original duration when known
-    if (typeof b.hours !== 'undefined' || typeof b.mins !== 'undefined') {
-      const dur = Math.max(60, Number(b.hours || 0) * 3600 + Number(b.mins || 0) * 60);
-      t.targetAt = Date.now() + dur * 1000; t.done = false;
-    }
+    try {
+      const dur = b.hours !== undefined || b.mins !== undefined ? time.duration(b) : t.durationSec;
+      if (!Number.isFinite(dur) || dur <= 0) throw new Error('Original duration unavailable; provide hours/mins');
+      t.targetAt = time.durationTarget(dur); t.durationSec = dur; t.done = false;
+    } catch(e) { return res.status(400).json({ error: e.message }); }
   }
-  saveDb(); broadcast('timers', sortTimers(db.timers));
+
+  db.timers[timerIndex] = t;
+  await saveDb(); broadcast('timers', sortTimers(db.timers));
   res.json(t);
-});
-app.delete('/api/timers/:id', adminAuth, (req, res) => {
+}));
+app.delete('/api/timers/:id', adminAuth, mutation(async (req, res) => {
   db.timers = (db.timers || []).filter(x => x.id !== req.params.id);
-  saveDb(); broadcast('timers', sortTimers(db.timers));
+  await saveDb(); broadcast('timers', sortTimers(db.timers));
   res.json({ ok: true });
-});
+}));
 // Legacy compat: old clients posting single long/short map onto named timers.
-app.post('/api/timers/long', adminAuth, (req, res) => {
-  let targetAt = req.body.targetAt;
-  if (!targetAt && req.body.days) targetAt = Date.now() + Number(req.body.days) * 24 * 3600 * 1000;
-  if (!targetAt) return res.status(400).json({ error: 'days or targetAt required' });
+app.post('/api/timers/long', adminAuth, mutation(async (req, res) => {
+  let targetAt;
+  try { targetAt = longTarget(req.body); } catch(e) { return res.status(400).json({ error: e.message }); }
   const name = String(req.body.label || 'Long term').slice(0, 60);
   let t = (db.timers || []).find(x => x.type === 'long' && x.name === name && !x.done);
   if (t) { t.targetAt = Number(targetAt); }
-  else { t = { id: makeTimerId(), name, type: 'long', targetAt: Number(targetAt), createdAt: Date.now(), done: false, pausedLeftSec: null }; db.timers.push(t); }
-  saveDb(); broadcast('timers', sortTimers(db.timers));
+  else { if (db.timers.length >= 20) return res.status(409).json({ error: 'Timer limit reached (20)' }); t = { id: makeTimerId(), name, type: 'long', targetAt: Number(targetAt), createdAt: Date.now(), done: false, pausedLeftSec: null }; db.timers.push(t); }
+  await saveDb(); broadcast('timers', sortTimers(db.timers));
   res.json(t);
-});
-app.post('/api/timers/short', adminAuth, (req, res) => {
+}));
+app.post('/api/timers/short', adminAuth, mutation(async (req, res) => {
   const { action } = req.body;
   const name = String(req.body.label || 'Focus').slice(0, 60);
   const shorts = (db.timers || []).filter(x => x.type === 'short');
   let s = shorts.find(x => x.name === name && !x.done) || shorts.filter(x => !x.done).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
   if (action === 'start') {
-    const h = Number(req.body.hours || 0), m = Number(req.body.mins || 25);
-    const dur = Math.max(60, h * 3600 + m * 60);
-    if (s && s.name === name) { s.targetAt = Date.now() + dur * 1000; s.pausedLeftSec = null; s.done = false; s.durationSec = Math.round(dur); }
-    else { s = { id: makeTimerId(), name, type: 'short', targetAt: Date.now() + dur * 1000, createdAt: Date.now(), done: false, pausedLeftSec: null, durationSec: Math.round(dur) }; db.timers.push(s); }
+    let dur, targetAt;
+    try { dur = time.duration(req.body, 25); targetAt = time.durationTarget(dur); } catch(e) { return res.status(400).json({ error: e.message }); }
+    if (s && s.name === name) { s.targetAt = targetAt; s.pausedLeftSec = null; s.done = false; s.durationSec = Math.round(dur); }
+    else { if (db.timers.length >= 20) return res.status(409).json({ error: 'Timer limit reached (20)' }); s = { id: makeTimerId(), name, type: 'short', targetAt, createdAt: Date.now(), done: false, pausedLeftSec: null, durationSec: Math.round(dur) }; db.timers.push(s); }
   } else if (!s) return res.status(404).json({ error: 'no short timer' });
   else if (action === 'pause' && s.targetAt) {
     s.pausedLeftSec = Math.max(0, Math.round((s.targetAt - Date.now()) / 1000));
@@ -368,9 +387,9 @@ app.post('/api/timers/short', adminAuth, (req, res) => {
   } else if (action === 'reset') {
     s.targetAt = null; s.pausedLeftSec = null;
   } else return res.status(400).json({ error: 'bad action' });
-  saveDb(); broadcast('timers', sortTimers(db.timers));
+  await saveDb(); broadcast('timers', sortTimers(db.timers));
   res.json(s);
-});
+}));
 
 // ---- Weather (Open-Meteo, cached 30 min). 6th October city coords ----
 const WEATHER_META = {
@@ -382,90 +401,132 @@ const WEATHER_META = {
   80: ['Showers', '🌦️'], 81: ['Showers', '🌦️'], 82: ['Heavy showers', '🌧️'], 85: ['Snow showers', '🌨️'], 86: ['Snow showers', '🌨️'],
   95: ['Storm', '⛈️'], 96: ['Storm + hail', '⛈️'], 99: ['Storm + hail', '⛈️']
 };
-async function refreshWeather() {
-  try {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${WEATHER_LAT}&longitude=${WEATHER_LON}&current=temperature_2m,weather_code&timezone=Africa%2FCairo`;
-    const r = await fetch(url);
-    const j = await r.json();
-    const [label, icon] = WEATHER_META[j.current.weather_code] || ['—', '🌡️'];
-    db.weather = {
-      temp: Math.round(j.current.temperature_2m),
-      code: j.current.weather_code,
-      label, icon,
-      updatedAt: Date.now()
-    };
-    broadcast('weather', db.weather);
-  } catch (e) { console.error('weather failed', e.message); }
+let weatherRequest;
+function weatherState() { return { ...db.weather, stale: !db.weather.updatedAt || Date.now()-db.weather.updatedAt > 30*60000 }; }
+function refreshWeather() {
+  if (weatherRequest) return weatherRequest;
+  weatherRequest = (async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    try {
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${WEATHER_LAT}&longitude=${WEATHER_LON}&current=temperature_2m,weather_code&timezone=${encodeURIComponent(TIME_ZONE)}`;
+      const r = await fetchImpl(url, { signal: controller.signal });
+      if (!r.ok) throw new Error('HTTP '+r.status);
+      const j = await r.json();
+      if (!j.current || typeof j.current.temperature_2m !== 'number' || !Number.isFinite(j.current.temperature_2m) || typeof j.current.weather_code !== 'number' || !Number.isFinite(j.current.weather_code)) throw new Error('Invalid weather sample');
+      const [label, icon] = WEATHER_META[j.current.weather_code] || ['—', '🌡️'];
+      db.weather = {temp:Math.round(j.current.temperature_2m),code:j.current.weather_code,label,icon,updatedAt:Date.now(),attemptedAt:Date.now(),error:null};
+    } catch(e) {
+      db.weather = { ...db.weather, attemptedAt:Date.now(), error:'Weather refresh failed; retrying automatically' };
+    } finally { clearTimeout(timeout); }
+    broadcast('weather',weatherState());
+  })().finally(() => { weatherRequest = null; });
+  return weatherRequest;
 }
 app.get('/api/weather', async (req, res) => {
   if (Date.now() - (db.weather.updatedAt || 0) > 30 * 60 * 1000) await refreshWeather();
-  res.json(db.weather);
+  res.json(weatherState());
 });
-refreshWeather();
-setInterval(refreshWeather, 30 * 60 * 1000);
 
 // ---- Dashboard clock override (set from /admin) ----
 // Kiosk clock shows real time + offsetSec. Timers/countdowns always use real time.
 app.get('/api/time', (req, res) => {
-  res.json({ offsetSec: db.time.offsetSec || 0, dashboardNow: Date.now() + (db.time.offsetSec || 0) * 1000 });
+  res.json({ timeZone: TIME_ZONE, offsetSec: db.time.offsetSec || 0, dashboardNow: Date.now() + (db.time.offsetSec || 0) * 1000 });
 });
-app.post('/api/time', adminAuth, (req, res) => {
+app.post('/api/time', adminAuth, mutation(async (req, res) => {
   const b = req.body || {};
   if (b.action === 'reset') {
     db.time = { offsetSec: 0, updatedAt: Date.now() };
   } else if (typeof b.offsetSec !== 'undefined') {
-    const off = Math.max(-86400 * 365, Math.min(86400 * 365, Number(b.offsetSec) || 0));
+    let numericOffset;
+    try { numericOffset = time.numeric(b.offsetSec); } catch(e) { return res.status(400).json({ error: e.message }); }
+    const off = Math.max(-86400 * 365, Math.min(86400 * 365, numericOffset));
     db.time = { offsetSec: Math.round(off), updatedAt: Date.now() };
   } else if (b.datetime) {
     // datetime-local string from admin, e.g. "2026-01-12T14:30"
-    const t = new Date(b.datetime).getTime();
-    if (!Number.isFinite(t)) return res.status(400).json({ error: 'bad datetime' });
+    let t;
+    try { t = time.dateTime(b.datetime, TIME_ZONE); } catch(e) { return res.status(400).json({ error: e.message }); }
     db.time = { offsetSec: Math.round((t - Date.now()) / 1000), updatedAt: Date.now() };
   } else return res.status(400).json({ error: 'datetime, offsetSec or action=reset required' });
-  saveDb(); broadcast('time', db.time);
-  res.json({ offsetSec: db.time.offsetSec, dashboardNow: Date.now() + db.time.offsetSec * 1000 });
-});
+  await saveDb(); broadcast('time', db.time);
+  res.json({ timeZone: TIME_ZONE, offsetSec: db.time.offsetSec, dashboardNow: Date.now() + db.time.offsetSec * 1000 });
+}));
 // ---- Google Calendar via private ICS URL (poll every 10 min) ----
+let calendarGeneration = 0;
+function calendarState() { return { ...db.calendar, stale: !!db.calendar.configured && (!db.calendar.updatedAt || Date.now()-db.calendar.updatedAt > 20*60000) }; }
 async function refreshCalendar() {
+  const generation = ++calendarGeneration;
   const url = (db.settings.icsUrl || '').trim();
   if (!url) {
-    if (db.calendar.configured) { db.calendar = { next: null, upcoming: [], updatedAt: 0, error: null, configured: false }; broadcast('calendar', db.calendar); }
-    return;
+    db.calendar = { next:null,upcoming:[],updatedAt:0,error:null,configured:false };
+    broadcast('calendar',calendarState());
+    return {ok:true};
   }
   try {
-    const text = await ics.fetchIcs(url);
-    const events = ics.parseIcs(text);
+    const text = await ics.fetchIcs(url,fetchImpl);
+    const events = ics.parseIcs(text,TIME_ZONE);
+    if (generation !== calendarGeneration || url !== db.settings.icsUrl) return {ok:false,superseded:true};
     const now = Date.now();
-    db.calendar = {
-      next: ics.findNext(events, now),
-      upcoming: ics.upcoming(events, now, 14, 100),
-      updatedAt: now, error: null, configured: true
-    };
-    broadcast('calendar', db.calendar);
-  } catch (e) {
-    console.error('calendar refresh failed:', e.message);
-    db.calendar.error = String(e.message || e).slice(0, 160);
-    db.calendar.configured = true;
-    broadcast('calendar', db.calendar);
+    db.calendar = {next:ics.findNext(events,now),upcoming:ics.upcoming(events,now,14,100),updatedAt:now,attemptedAt:now,error:null,configured:true};
+    broadcast('calendar',calendarState());
+    return {ok:true};
+  } catch(e) {
+    if (generation !== calendarGeneration || url !== db.settings.icsUrl) return {ok:false,superseded:true};
+    // A private URL may appear in fetch error messages. Never publish it.
+    db.calendar = {...db.calendar,attemptedAt:Date.now(),error:'Calendar refresh failed; check the private URL and try again',configured:true};
+    broadcast('calendar',calendarState());
+    return {ok:false};
   }
 }
-app.get('/api/calendar', (req, res) => res.json(db.calendar));
-// ICS URL is secret (full read access) -> admin only, never sent to kiosk.
-app.get('/api/settings', adminAuth, (req, res) => res.json({ icsUrl: db.settings.icsUrl || '' }));
-app.post('/api/settings', adminAuth, async (req, res) => {
-  const icsUrl = String(req.body.icsUrl || '').trim().slice(0, 2000);
-  if (icsUrl && !/^https?:\/\/.+[./]/.test(icsUrl)) return res.status(400).json({ error: 'Must be an http(s) URL' });
-  db.settings.icsUrl = icsUrl;
-  saveDb();
-  await refreshCalendar();
-  res.json({ ok: true, calendar: db.calendar });
+app.get('/api/calendar', (req,res) => res.json(calendarState()));
+app.get('/api/settings', adminAuth, (req,res) => res.json({icsUrl:db.settings.icsUrl || ''}));
+app.post('/api/settings', adminAuth, async (req,res,next) => {
+  const icsUrl = String(req.body.icsUrl || '').trim();
+  try {
+    if (icsUrl.length > 2000) return res.status(400).json({error:'URL too long'});
+    if (icsUrl) { const url = new URL(icsUrl); if (!['http:','https:'].includes(url.protocol)) throw new Error('protocol'); }
+  } catch { return res.status(400).json({error:'Must be an http(s) URL'}); }
+  try {
+    await transaction(async () => {
+      const changed = db.settings.icsUrl !== icsUrl;
+      db.settings.icsUrl = icsUrl;
+      await saveDb();
+      ++calendarGeneration;
+      if (changed) db.calendar = {next:null,upcoming:[],updatedAt:0,error:null,configured:!!icsUrl};
+    });
+    // Fetch outside the mutation queue: disconnect/new URLs must supersede it.
+    const result = await refreshCalendar();
+    if (result.superseded) return res.status(409).json({ok:false,error:'Calendar settings changed during refresh',calendar:calendarState()});
+    res.status(result.ok ? 200 : 502).json({ok:result.ok,...(!result.ok ? {error:db.calendar.error} : {}),calendar:calendarState()});
+  } catch(e) { next(e); }
 });
-refreshCalendar();
-setInterval(refreshCalendar, 10 * 60 * 1000);
 
-function num(v, d) { const n = Number(v); return Number.isFinite(n) ? n : d; }
-
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`tablet-dashboard v0.1 on http://0.0.0.0:${PORT}  (LAN + Tailscale OK)`);
-  console.log(`kiosk: /   admin: /admin  ${needsSetup() ? 'NO ADMIN YET — open /admin to create one' : 'admin exists'}${ENV_ADMIN_USER ? ' (env fallback login enabled)' : ''}`);
+function longTarget(body) {
+  let target;
+  if (body.targetAt !== undefined) target = time.numeric(body.targetAt);
+  else if (body.date !== undefined) target = time.dateTime(body.date, TIME_ZONE);
+  else if (body.days !== undefined && time.numeric(body.days) > 0) target = Date.now() + time.numeric(body.days) * 86400000;
+  if (!Number.isFinite(target) || target <= 0 || !Number.isFinite(new Date(target).getTime())) throw new Error('Valid days, date or targetAt required');
+  return target;
+}
+app.use((error,req,res,next) => {
+  console.error('request failed:', error.message);
+  if (!res.headersSent) res.status(error.status || 500).json({ error: error.status === 400 ? 'Invalid request body' : 'Unable to save changes; please retry' });
 });
+function startBackground() {
+  if (intervals.length) return;
+  ready.then(() => { refreshWeather(); refreshCalendar(); }).catch(e => console.error('startup persistence failed:', e.message));
+  every(() => transaction(saveDb).catch(e => console.error('database save failed:', e.message)), 15000);
+  every(refreshWeather, 30 * 60000);
+  every(refreshCalendar, 10 * 60000);
+  every(() => { for (const res of sseClients) res.write(': heartbeat\n\n'); }, 25000);
+}
+function stopBackground() { for (const timer of intervals.splice(0)) clearInterval(timer); for (const res of sseClients) res.end(); sseClients.clear(); }
+if (background) startBackground();
+return { app, ready, startBackground, stopBackground };
+}
+module.exports = { createDashboard };
+if (require.main === module) {
+  const dashboard = createDashboard({ background: true });
+  dashboard.ready.then(() => dashboard.app.listen(process.env.PORT || 1200, '0.0.0.0', () => console.log('tablet-dashboard listening on port ' + (process.env.PORT || 1200)))).catch(e => { console.error(e.message); process.exitCode = 1; dashboard.stopBackground(); });
+}
