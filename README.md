@@ -1,163 +1,164 @@
-# Tablet Dashboard v0.1 (base)
+# Tablet Dashboard
 
-10" Samsung Android kiosk display (`/`) + control page (`/admin`).
-Hosted on your home lab, reachable over LAN or Tailscale.
+A read-only tablet display at `/` and an admin page at `/admin`, hosted on your home lab over LAN or Tailscale. Node/Express serves vanilla HTML/CSS/JavaScript with live Server-Sent Events (SSE); a Python agent reports one Windows or Linux machine. State lives in a JSON file, with atomic saves and a previous-good backup.
 
-**Stack:** Node/Express server + Python agent (Win11).
-- Server is always-on, low RAM, pushes live updates to the tablet via SSE — Node is ideal, zero build step.
-- Win11 hardware stats (CPU/GPU/RAM/disks) are read best in Python (`psutil`, `GPUtil` / `nvidia-smi`) — `agent/agent.py` POSTs every 2s.
-- Storage: JSON file in `./data/db.json` (no native deps, works on Windows + Docker).
-- Time: 12h clock. Weather: 6th of October, Giza (Open-Meteo, cached 30 min).
+## Start the server
 
----
-
-## 1. Prerequisites
-
-| Where | Need |
-|---|---|
-| Dev PC / home lab server | Node 24+, npm, (optional) Docker + Docker Compose |
-| Main PC (Win11) | Python 3.11+, `pip install -r agent/requirements.txt` |
-| Tablet (Samsung Android) | Fully Kiosk Browser (free) or Chrome |
-| Network | Same LAN, or Tailscale on all devices |
-
-## 2. Quickstart (Windows, 2 min)
-
-```powershell
-cd "E:\Projects\Tablet dashbaord"
-npm install
-copy .env.example .env
-node server.js
-```
-
-Open:
-- Display → http://localhost:1200
-- Admin → http://localhost:1200/admin → create your account on first boot
-
-You should see mock/empty stats until the agent connects (pill shows `PC OFFLINE` — normal).
-
-## 3. Environment variables
-
-Copy `.env.example` → `.env` and edit:
-
-```
-PORT=1200
-WEATHER_LAT=29.9668           # 6th of October
-WEATHER_LON=30.9333
-DATA_DIR=./data
-# Optional legacy fallback (only used if no account created yet via setup page):
-# ADMIN_USER=admin
-# ADMIN_PASS=changeme123
-```
-
-> First boot: open `/admin` and **create your admin account** (username 3-32 chars, password min 6).
-> It's hashed (scrypt) and stored in `./data/db.json`. Setting `ADMIN_USER` + `ADMIN_PASS` env vars
-> enables an additional fallback login (for scripts/docker) — otherwise only created accounts work.
-
-Server listens on `0.0.0.0` so it works over LAN + Tailscale with no extra config.
-
-## 4. Run on home lab (Docker, recommended)
+Use Node 24 and npm, or Docker with Compose. From the repository directory:
 
 ```bash
-cd /path/to/tablet-dashboard
-docker compose up -d --build
-docker compose logs -f
-# open http://<lab-ip>:1200  (e.g. http://192.168.1.50:1200)
+npm ci
+cp .env.example .env
+npm start
 ```
 
-Data persists in `./data/db.json` (mounted to `/data` in container).
-To change admin password: edit `docker-compose.yml` → `ADMIN_PASS`, then `docker compose up -d`.
+In PowerShell, use `Copy-Item .env.example .env` instead of `cp`. Open [the display](http://localhost:1200) or [admin](http://localhost:1200/admin); use the server's LAN/Tailscale address from another device. On first boot, create an admin account (username 3–32 letters, digits or `._-`; password at least 6 characters). There is no default password. Hardware readings stay unavailable until an agent sends them.
 
-To update after a `git pull`:
+The server listens on all interfaces. Public reads and `/api/pc` telemetry writes are unauthenticated for the existing trusted LAN/Tailscale use. Admin changes require a token or HTTP Basic credentials. Keep it on that trusted network; this project does not provide public-internet deployment or agent authentication.
+
+## Configuration
+
+Copy `.env.example` to `.env` and adjust:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `PORT` | `1200` | Server port; with Compose, the published host port |
+| `APP_TIMEZONE` | `Africa/Cairo` | IANA timezone for clock, local timer inputs and calendar display; invalid zones stop startup |
+| `WEATHER_LAT` / `WEATHER_LON` | `29.9668` / `30.9333` | Weather location (6th of October City, Giza) |
+| `DATA_DIR` | `./data` | Persistent directory; Compose mounts it at `/data` |
+| `ADMIN_USER` / `ADMIN_PASS` | unset | Optional legacy login, only while no stored account exists |
+
+Create the account through `/admin` even if using the legacy login. Stored passwords are scrypt hashes. Once an account exists, environment credentials stop working; changing `ADMIN_PASS` cannot reset that account. Compose intentionally does not pass legacy credentials. Browser sessions expire after seven days and are lost when the server restarts.
+
+## Docker
+
 ```bash
 docker compose up -d --build
+docker compose logs -f dashboard
 ```
 
-## 5. Win11 agent (sends CPU/GPU/RAM)
+The image installs locked production packages with `npm ci --omit=dev`; its healthcheck calls `/api/health`. The JSON data and backup persist in `./data` by default. The agent runs on the machine being measured, outside the server container. To update, back up the persistent directory, pull the code, then run `docker compose up -d --build` again.
 
-On your main Win11 PC:
+Compose reads the configuration values above from `.env`. The container always listens on port 1200; `PORT` controls its host mapping. Give the container write access to the mounted data directory. Run exactly one server process/container against each `DATA_DIR`: there is no cross-process lock or shared-writer support.
+
+## Choose one reporting machine
+
+Run **either the Linux agent or the Windows agent** for a dashboard. It has one PC card, and concurrent agents overwrite that same card; there is no multi-device identity or history. Multiple device cards would require future backend/UI work.
+
+Both entrypoints share sampling and transport. They send `cpu`, `ram`, `gpu`, `cpuTemp`, `gpuTemp`, `uptimeSec`, `disks` and boolean `capabilities` to `/api/pc`. Unavailable/unsupported readings are JSON `null` and show as unavailable; real zero readings remain zero. The first CPU reading is unavailable while psutil establishes its sampling interval. Capabilities describe availability in the current sample, not guaranteed hardware support.
+
+- Polling defaults to every 2 seconds, plus sampling/send time. Set `INTERVAL` to a positive finite number of seconds within Python's supported wait range. Long intervals can intentionally cause the display's 10-second PC freshness threshold to mark it stale.
+- Mounted disk usage is cached for three hours, including an empty result; inaccessible mounts are skipped. The backend displays at most eight disks. This is current cached capacity, not a usage history.
+- GPU load and temperature use the first GPU from `nvidia-smi` if installed and readable, with a two-second subprocess timeout. AMD/Intel GPU readings remain unavailable in this implementation. CPU temperatures use supported psutil CPU sensor groups when readable; Windows commonly has none. No elevated agent privileges are required.
+- Each HTTP attempt has a five-second socket timeout and does not read the response body. Failed sends are logged and retried on the next cycle. Ctrl+C or SIGTERM requests shutdown; an in-flight sensor/network operation can finish before exit.
+- Agent variables are ordinary process environment variables; the agent does **not** read the server's `.env` file.
+
+### Linux
+
+Use Python 3.11+ with `venv` support. From the repository directory:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r agent/requirements.txt
+SERVER=http://192.168.1.50:1200 INTERVAL=2 .venv/bin/python agent/linux_agent.py
+```
+
+Set `SERVER` to the dashboard's LAN/Tailscale address; localhost works only when the dashboard runs on the same host.
+
+For an optional boot service, [agent/tablet-dashboard-agent.service](agent/tablet-dashboard-agent.service) runs as a dedicated unprivileged `tablet-agent` user. It assumes a readable installation at `/opt/tablet-dashboard` and a venv there. Copy the repository there first, create its venv with the commands above, then adapt these setup commands to your distribution:
+
+```bash
+sudo useradd --system --home-dir /nonexistent --shell /usr/sbin/nologin tablet-agent
+sudo install -m 600 agent/linux-agent.env.example /etc/tablet-dashboard-agent.env
+sudoedit /etc/tablet-dashboard-agent.env
+sudo install -m 644 agent/tablet-dashboard-agent.service /etc/systemd/system/tablet-dashboard-agent.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now tablet-dashboard-agent.service
+journalctl -u tablet-dashboard-agent.service -f
+```
+
+Run those commands yourself when ready; nothing in this repository installs or activates the service automatically. Edit `SERVER` in the environment file before starting. Keep the code/venv readable and executable by `tablet-agent`; it needs no write access to the installation or dashboard data. The service declares its working directory and environment file explicitly, drops privileges, and requests a read-only filesystem. If your distribution restricts GPU/temperature access, leave those readings unavailable or grant only the relevant device-group access; do not run the agent as root. To stop it: `sudo systemctl disable --now tablet-dashboard-agent.service`.
+
+### Windows
+
+From the repository in PowerShell:
 
 ```powershell
-cd "E:\Projects\Tablet dashbaord"
-pip install -r agent/requirements.txt
-$env:SERVER="http://<lab-ip>:1200"   # use home-lab LAN or Tailscale IP, NOT localhost
-python agent/agent.py
+py -3 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r agent/requirements.txt
+$env:SERVER="http://192.168.1.50:1200"
+$env:INTERVAL="2"
+.\.venv\Scripts\python.exe agent/agent.py
 ```
 
-Expected output: `agent -> http://<lab-ip>:1200 ...` and the tablet pill flips to `PC ONLINE`.
+The existing `python agent/agent.py` command also works when its Python environment has the requirements installed. For Task Scheduler, use the full venv Python path, the full script path, and the repository as **Start in**. A `.cmd` wrapper can set `SERVER` and `INTERVAL` before calling Python. Use `python.exe` with log redirection when diagnosing startup errors; `pythonw.exe` hides console logs.
 
-- Posts every 2s (`INTERVAL=2` to change).
-- Disks refresh every 3h per spec.
-- GPU: tries `GPUtil` → `nvidia-smi` → falls back to 0 (AMD iGPU shows 0 in v0.1).
-- No firewall change needed on main PC (it only makes outbound POSTs).
+## Tablet and admin behavior
 
-### Auto-start on boot (Task Scheduler)
+Point a kiosk browser (for example Fully Kiosk Browser or Chrome) at `http://<server-ip>:1200`. Configure fullscreen, keep-screen-on and reload-on-reconnect as needed. Admin works on a phone or desktop at `/admin`.
 
-1. Task Scheduler → Create Task → Run whether user is logged on or not.
-2. Trigger: At log on. Action: `pythonw.exe "E:\Projects\Tablet dashbaord\agent\agent.py"`.
-3. Set env `SERVER` in the script or wrap in a `.bat`:
-   ```bat
-   set SERVER=http://192.168.1.50:1200
-   pythonw "E:\Projects\Tablet dashbaord\agent\agent.py"
-   ```
+- To-dos can be added, completed and deleted. The display shows the first five outstanding tasks and a count of additional items. New tasks are rejected at 50 rather than discarding old items.
+- Named long timers use days from now or a target date. Short timers use hours/minutes or the next occurrence of a clock time. Local wall times use `APP_TIMEZONE`; nonexistent DST times are rejected. Existing timers can be marked done, recolored or deleted in admin. New timers are rejected at 20. The API also retains legacy timer routes and pause/resume/reset/restart actions; the UI does not add those controls.
+- The clock override changes only the displayed dashboard clock. Timers, freshness and calendar event instants continue using real server time.
+- Connect a calendar by pasting its secret iCal/ICS URL into admin. It is saved server-side and available only through authenticated settings, never in public snapshots. The display shows today's all-day and timed events, with live/past states. Recurrence, exclusions and overrides are parsed by `node-ical`; the timeline covers 14 days and next-event search is bounded to one year. Automatic calendar refresh is every 10 minutes.
+- A calendar URL can be saved even if its refresh fails. Admin reports that failure and keeps the draft; the server retries automatically. Changing the URL clears the old calendar's events; a failed refresh of the same URL retains its last successful events. Disconnect prevents a pending older fetch from restoring the calendar.
+- Server connectivity and PC freshness have separate indicators. PC data becomes stale after 10 seconds without a sample. Cached weather/calendar values remain visible on fetch failure, alongside warnings. Calendar is stale after 20 minutes without success, weather after 30 minutes. Weather normally refreshes every 30 minutes.
+- Admin checks mutation responses, keeps failed drafts and restores rejected checkbox/color changes. Updates from other admin clients arrive through SSE, with periodic polling as fallback. Focused controls are preserved while lists reconcile later. Landscape cards scroll internally; portrait pages scroll to reach detailed PC information.
 
-## 6. Tablet setup (Samsung Android)
+## Persistence, backups and recovery
 
-1. Install **Fully Kiosk Browser**.
-2. Start URL: `http://<lab-ip>:1200`.
-3. Enable: Fullscreen, Keep Screen On, Auto-reload on network reconnect.
-4. Optional: Screen dim 11pm–7am in Fully settings.
+Admin changes finish saving before reporting success. Saves serialize, fsync a temporary file and atomically replace `db.json`; `db.json.bak` contains the previous successful snapshot. Telemetry and external caches checkpoint every 15 seconds, so abrupt shutdown can lose recent transient readings. The `.bak` file is a rotating previous snapshot, **not** a backup history. Keep separate backups of the whole data directory, which contains account hashes and private calendar settings.
 
-No touch needed — display is read-only. All control is from `/admin` on your phone/PC.
+To take a consistent backup, stop the server (for Compose: `docker compose stop dashboard`), copy the entire configured data directory to a protected backup location, then restart. Do not run a second writer during backup or recovery. Keep backup permissions restricted.
 
-## 7. Using /admin
+At startup, a missing/corrupt primary recovers automatically from a valid `db.json.bak`. A corrupt primary is retained as `db.json.corrupt-<timestamp>`. If existing primary/backup files are both invalid, startup fails and preserves them. Stop the server, copy the entire damaged directory aside, restore a known-good `db.json` and its matching backup from your independent backup, verify ownership/write permissions, then restart and check the logs and admin data. Restoring an older backup also rolls back its tasks, timers, settings and credentials. **Do not delete the database to fix corruption or login problems.**
 
-Open `http://<lab-ip>:1200/admin` and sign in on the custom login page (`ADMIN_USER` / `ADMIN_PASS`).
-Session lasts 7 days (token in browser localStorage). No browser popup — wrong creds show an inline error.
+There is no built-in password-reset screen or command. A stored account cannot be overridden by environment variables. If credentials are lost, retain the database and recover from a protected backup with known credentials; do not clear all data or remove account fields from a live file. Session tokens are in memory, so sign in again after a server restart.
 
-- **To-do:** add, check/uncheck, delete. Kiosk shows top 5 unchecked.
-- **Timers (multiple, named):** pick 📅 Long or ⏱ Short, type a name, then:
-  - Long → days from now **or** a target date (kiosk shows `12d 4h` counting from today).
-  - Short → countdown hours/mins **or** a clock time today like `18:30` (kiosk counts down to it).
-  - All timers list below with a **checkbox** to mark done, a **color dot** to recolor, tag, and delete. Done timers show ✓ on the kiosk, each in its own color (left border + progress bar).
-- Empty to-do / empty day shows *"You have nothing to do, sir 🎩"* on the tablet.
-- **Storage:** per-disk bars on the kiosk turn red past 80%. Agent sends disks every 3h.
-- **Dashboard time:** pick date + time in `/admin` to shift the kiosk clock (shows day-month-year like `12-1-2026`), or reset to real time. Only the clock display shifts — timers keep real time.
-- **Google Calendar:** paste your calendar's **Secret address in iCal format** (Calendar Settings → Integrate calendar) into the `/admin` Calendar card → Connect. Tablet shows **today's events in a vertical timeline** (all-day chips on top, live event highlighted, `now` marker, done items dimmed), refreshed every 10 min. Supports recurring events. The URL stays server-side — never sent to the tablet.
+## API reference
 
-## 8. API reference
+Public read and telemetry routes retain their trusted-network semantics. Protected routes accept `Authorization: Bearer <token>`; scripts may also use HTTP Basic with a valid stored account (or the legacy environment account before setup).
 
-| Method | Endpoint | Auth | Notes |
-|---|---|---|---|
-| GET | `/api/health` | no | `{ ok, sseClients, pcAgeSec }` |
-| GET | `/api/snapshot` | no | full state for first paint |
-| GET | `/api/stream` | no | SSE: `snapshot, pc, todos, timers, weather` |
-| GET/POST | `/api/pc` | no (POST open for LAN agent) | agent POSTs `{ cpu, ram, gpu, disks }` |
-| GET | `/api/todos` | no | list |
-| POST/PATCH/DELETE | `/api/todos…` | admin token (Bearer) | mutate |
-| GET | `/api/timers` | no | `{ long, short }` |
-| GET | `/api/timers` | no | named timers array |
-| POST | `/api/timers` | admin token (Bearer) | `{ name, type: long\|short, days\|date\|targetAt, hours\|mins\|atTime }` |
-| PATCH | `/api/timers/:id` | admin token (Bearer) | `{ name?, done?, action: pause\|resume\|reset }` |
-| DELETE | `/api/timers/:id` | admin token (Bearer) | remove |
-| POST | `/api/setup` | no (only when no users exist) | `{ user, pass }` → `{ token }` — first-boot create |
-| POST | `/api/login` | no | `{ user, pass }` → `{ token }` |
-| GET | `/api/me` | no | `{ loggedIn }` |
-| GET | `/api/weather` | no | cached Open-Meteo |
-| GET | `/api/calendar` | no | `{ next, upcoming[], updatedAt, error, configured }` (no secret URL) |
-| GET | `/api/settings` | admin token | `{ icsUrl }` |
-| POST | `/api/settings` | admin token | `{ icsUrl }` → saves + refreshes calendar |
+| Method | Endpoint | Result / request |
+|---|---|---|
+| GET | `/api/health` | `{ok, now, sseClients, pcAgeSec}`; server health, not hardware health |
+| GET | `/api/snapshot` | Current state, server `now`, configured `timeZone` |
+| GET | `/api/stream` | SSE snapshots and resource updates, with heartbeat comments |
+| GET / POST | `/api/pc` | Latest sample / agent submission; nullable measurements and disk array |
+| GET | `/api/todos` | Task array |
+| POST | `/api/todos` | Protected: `{text}` |
+| PATCH / DELETE | `/api/todos/:id` | Protected: edit `{text?, done?}` / delete |
+| GET | `/api/timers` | Sorted named timer array |
+| POST | `/api/timers` | Protected: `{name, type, color?, days/date/targetAt}` for long; `{name, type:"short", hours/mins or atTime, color?}` for short |
+| PATCH / DELETE | `/api/timers/:id` | Protected: `{name?, done?, color?, action?}` / delete; restart may supply `hours`, `mins` |
+| POST | `/api/timers/long`, `/api/timers/short` | Protected legacy compatibility endpoints |
+| GET / POST | `/api/time` | Timezone/offset/dashboard epoch / protected `{datetime}`, `{offsetSec}` or `{action:"reset"}` |
+| POST | `/api/setup` | First stored account only: `{user, pass}` → token |
+| POST | `/api/login`, `/api/logout` | `{user, pass}` → token / revoke supplied bearer token |
+| GET | `/api/me` | `{loggedIn, needsSetup}` |
+| GET | `/api/weather` | Cached weather with update/attempt times, error and stale state |
+| GET | `/api/calendar` | `{next, upcoming, updatedAt, attemptedAt, error, stale, configured}` |
+| GET / POST | `/api/settings` | Protected: read / save `{icsUrl}`; empty URL disconnects |
 
-## 9. Troubleshooting
+Validation errors return 400, item-capacity limits 409, unauthorized changes 401, and failed durable writes 500. Calendar settings refresh can return 502 after saving the URL, or 409 if a newer request superseded it. Clients must check HTTP status as well as response JSON.
 
-- **PC OFFLINE on tablet:** agent not reaching server. Check `$env:SERVER` uses lab IP, not localhost. `curl http://<lab-ip>:1200/api/health` from main PC.
-- **Can't log in on /admin:** on first boot you must **create** the account on the setup screen — there is no default password. If you forgot it, stop the server, delete the `users` array in `./data/db.json` (or the whole file to reset), restart, and create a new one. Scripts can still use HTTP Basic on the API with the created account.
-- **Weather shows —:** no internet on server or Open-Meteo blocked. Server caches last value; check logs.
-- **Port in use:** change `PORT` in `.env` (e.g. `8090`).
-- **Push rejected:** repo is private — `git pull --rebase` then push, or use a PAT with `repo` scope.
+## Troubleshooting and checks
 
-## 10. v0.2 next
+- **PC stale/unavailable:** inspect agent logs; check `SERVER`, network reachability and `INTERVAL`. A health GET from the agent host tests reachability without sending telemetry. Missing GPU/temperature support is normal and remains unavailable.
+- **Login fails:** first boot requires setup; later boots require the stored account. Changing environment credentials does not reset it. See backup/recovery above.
+- **Calendar/weather warning:** check outbound connectivity and server logs. Last successful cached values can remain visible during a failure.
+- **Write failure/startup refuses data:** preserve primary/backup files, inspect filesystem permissions, free space and recovery logs. Never reset data as a first troubleshooting step.
+- **Port already in use:** change `PORT` in `.env`, then restart; Compose uses that value for its host port mapping.
 
-- Google Calendar next-event (`/api/calendar` OAuth/ICS)
-- GPU temp via LibreHardwareMonitor, storage graph
-- Timer alarm flash + short presets
-- SQLite move if `db.json` outgrows use
+Run the regression suites from the repository root:
+
+```bash
+npm ci
+npm test
+python3 -m pip install -r agent/requirements.txt
+python3 -m unittest discover -s agent/tests -v
+# Equivalent Python shortcut on Linux: npm run test:agent
+docker compose config --quiet
+```
+
+Tests use temporary databases and fake weather/calendar/hardware/network boundaries. They do not contact a live calendar, read host hardware or send telemetry. CI runs the Node 24 suite and Python 3.11 agent tests. Multi-device reporting, additional GPU backends and password-management workflows remain future work; they are not part of the current UI.

@@ -1,13 +1,14 @@
 {
   "name": "tablet-dashboard",
   "version": "0.1.0",
-  "description": "10-inch kiosk dashboard + /admin control. Server: Node/Express. Agent: Python (Win11).",
+  "description": "10-inch kiosk dashboard + /admin control. Node/Express server and Windows/Linux Python agents.",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "test:agent": "python3 -m unittest discover -s agent/tests -v"
   },
   "dependencies": {
     "cors": "^2.8.5",

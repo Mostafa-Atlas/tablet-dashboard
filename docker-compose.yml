@@ -2,12 +2,14 @@ services:
   dashboard:
     build: .
     ports:
-      - "1200:1200"
+      - "${PORT:-1200}:1200"
     environment:
-      - PORT=1200
-      - WEATHER_LAT=29.9668
-      - WEATHER_LON=30.9333
-      # No ADMIN_USER/PASS here on purpose — create the account via /admin setup page.
+      PORT: "1200"
+      DATA_DIR: /data
+      APP_TIMEZONE: "${APP_TIMEZONE:-Africa/Cairo}"
+      WEATHER_LAT: "${WEATHER_LAT:-29.9668}"
+      WEATHER_LON: "${WEATHER_LON:-30.9333}"
+      # Create the account via /admin. Environment passwords cannot reset it.
     volumes:
-      - ./data:/data
+      - "${DATA_DIR:-./data}:/data"
     restart: unless-stopped

@@ -1,6 +1,6 @@
 # Dashboard reliability and Linux agent Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Fix the existing dashboard's reliability and usability defects and add a Linux telemetry agent.
 
@@ -33,12 +33,12 @@
 
 **Interfaces:** Preserve `/api/*` endpoints and snapshot fields. Add `timeZone` to snapshot/time responses, nullable telemetry values and optional `capabilities` metadata. Settings save must expose calendar fetch failure accurately. Keep calendar fields `next`, `upcoming`, `updatedAt`, `error`, `configured`. Frontend Task 2 consumes these contracts.
 
-- [ ] Write and run failing tests for persistence recovery and overlapping writes, recurrence cases, timer timezone/validation, malformed PC samples, calendar refresh race and false calendar success.
-- [ ] Implement atomic serialized JSON persistence with backup recovery and errors; make mutations await durable writes and avoid silently resetting corrupt data.
-- [ ] Replace partial ICS recurrence handling using node-ical; retain all-day dates and timezone semantics, expand an appropriate current window, honor exclusions and overrides.
-- [ ] Fix timer wall time and datetime handling, reject invalid values in current/legacy routes, and return an error instead of silently evicting existing tasks/timers.
-- [ ] Validate telemetry, preserve null measurements and metadata; add stream heartbeat, bounded weather fetch and stale/error metadata, superseded calendar request protection. Correct legacy auth fallback behavior to match documentation.
-- [ ] Run full Node tests and syntax checks. Report modified interfaces, commands/results, and remaining concerns to parent for independent review.
+- [x] Write and run failing tests for persistence recovery and overlapping writes, recurrence cases, timer timezone/validation, malformed PC samples, calendar refresh race and false calendar success.
+- [x] Implement atomic serialized JSON persistence with backup recovery and errors; make mutations await durable writes and avoid silently resetting corrupt data.
+- [x] Replace partial ICS recurrence handling using node-ical; retain all-day dates and timezone semantics, expand an appropriate current window, honor exclusions and overrides.
+- [x] Fix timer wall time and datetime handling, reject invalid values in current/legacy routes, and return an error instead of silently evicting existing tasks/timers.
+- [x] Validate telemetry, preserve null measurements and metadata; add stream heartbeat, bounded weather fetch and stale/error metadata, superseded calendar request protection. Correct legacy auth fallback behavior to match documentation.
+- [x] Run full Node tests and syntax checks. Report modified interfaces, commands/results, and remaining concerns to parent for independent review.
 
 ### Task 2: Existing UI correctness and tablet usability
 
@@ -46,12 +46,12 @@
 
 **Interfaces:** Consume Task 1's preserved API plus `timeZone`, nullable readings/capabilities and actual calendar fetch outcome. Keep current task/timer creation, completion, color and deletion workflows; no new editing/presets/focus workflows in this pass.
 
-- [ ] Write and run failing behavioral tests for aging PC samples, failed mutations, fresh admin clock/countdown and calendar stale states.
-- [ ] Recalculate sample age independently and distinguish stale samples from server connectivity; show unavailable readings and stale weather/calendar values.
-- [ ] Centralize checked requests/errors/pending states; show success only after success, preserve failed drafts, restore checkboxes on failure and stop expired-session actions.
-- [ ] Keep admin countdown/time live and synchronize remote changes without clobbering focused edits. Clock override affects the main clock only; calendar stays at actual event instants in the configured timezone.
-- [ ] Improve existing breakpoints/overflow for tablet/phone and long content, prioritize visible active/next content, add hidden-task count, labels/contextual names/live regions and reduced motion.
-- [ ] Run the full suite and frontend/browser smoke verification. Report modified interfaces and results for independent review.
+- [x] Write and run failing behavioral tests for aging PC samples, failed mutations, fresh admin clock/countdown and calendar stale states.
+- [x] Recalculate sample age independently and distinguish stale samples from server connectivity; show unavailable readings and stale weather/calendar values.
+- [x] Centralize checked requests/errors/pending states; show success only after success, preserve failed drafts, restore checkboxes on failure and stop expired-session actions.
+- [x] Keep admin countdown/time live and synchronize remote changes without clobbering focused edits. Clock override affects the main clock only; calendar stays at actual event instants in the configured timezone.
+- [x] Improve existing breakpoints/overflow for tablet/phone and long content, prioritize visible active/next content, add hidden-task count, labels/contextual names/live regions and reduced motion.
+- [x] Run the full suite and frontend/browser smoke verification. Report modified interfaces and results for independent review.
 
 ### Task 3: Linux agent and operations
 
@@ -59,12 +59,12 @@
 
 **Interfaces:** Python agents POST existing CPU/RAM/GPU/uptime/disks fields to `/api/pc`; unsupported readings are null, optional capabilities identifies availability. Linux entrypoint is `python3 agent/linux_agent.py`; Windows `python agent/agent.py` remains supported.
 
-- [ ] Write and run failing Python tests for Linux sampling, unsupported hardware, subprocess timeout, positive finite interval validation and transport errors. Use fake external hardware/network boundaries.
-- [ ] Implement Linux sampling with psutil and bounded optional GPU probes; validate configuration, provide graceful shutdown/logging and keep Windows compatible.
-- [ ] Supply a systemd service example with explicit working directory/environment and least-privileged execution; document venv installation and startup.
-- [ ] Use package-lock plus `npm ci` in Docker, add .dockerignore and healthcheck, ensure application timezone is configured, and add CI for Node/Python suites.
-- [ ] Correct obsolete README routes/future lists, environment fallback/password recovery advice and agent details; document safe persistence recovery and existing dashboard behavior.
-- [ ] Run full Node/Python suites, syntax checks and Compose validation. Report results for independent review.
+- [x] Write and run failing Python tests for Linux sampling, unsupported hardware, subprocess timeout, positive finite interval validation and transport errors. Use fake external hardware/network boundaries.
+- [x] Implement Linux sampling with psutil and bounded optional GPU probes; validate configuration, provide graceful shutdown/logging and keep Windows compatible.
+- [x] Supply a systemd service example with explicit working directory/environment and least-privileged execution; document venv installation and startup.
+- [x] Use package-lock plus `npm ci` in Docker, add .dockerignore and healthcheck, ensure application timezone is configured, and add CI for Node/Python suites.
+- [x] Correct obsolete README routes/future lists, environment fallback/password recovery advice and agent details; document safe persistence recovery and existing dashboard behavior.
+- [x] Run full Node/Python suites, syntax checks and Compose validation. Report results for independent review.
 
 ### Final verification
 

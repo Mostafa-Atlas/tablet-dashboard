@@ -1,0 +1,24 @@
+[Unit]
+Description=Tablet Dashboard Linux telemetry agent
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=tablet-agent
+Group=tablet-agent
+WorkingDirectory=/opt/tablet-dashboard
+EnvironmentFile=/etc/tablet-dashboard-agent.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/tablet-dashboard/.venv/bin/python /opt/tablet-dashboard/agent/linux_agent.py
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
