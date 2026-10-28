@@ -48,7 +48,7 @@ Run **either the Linux agent or the Windows agent** for a dashboard. It has one 
 Both entrypoints share sampling and transport. They send `cpu`, `ram`, `gpu`, `cpuTemp`, `gpuTemp`, `uptimeSec`, `disks` and boolean `capabilities` to `/api/pc`. Unavailable/unsupported readings are JSON `null` and show as unavailable; real zero readings remain zero. The first CPU reading is unavailable while psutil establishes its sampling interval. Capabilities describe availability in the current sample, not guaranteed hardware support.
 
 - Polling defaults to every 2 seconds, plus sampling/send time. Set `INTERVAL` to a positive finite number of seconds within Python's supported wait range. Long intervals can intentionally cause the display's 10-second PC freshness threshold to mark it stale.
-- Mounted disk usage is cached for three hours, including an empty result; inaccessible mounts are skipped. The backend displays at most eight disks. This is current cached capacity, not a usage history.
+- Mounted disk usage is cached for three hours, including an empty result; inaccessible mounts are skipped. The API retains at most eight disks; the kiosk displays at most six. This is current cached capacity, not a usage history.
 - GPU load and temperature use the first GPU from `nvidia-smi` if installed and readable, with a two-second subprocess timeout. AMD/Intel GPU readings remain unavailable in this implementation. CPU temperatures use supported psutil CPU sensor groups when readable; Windows commonly has none. No elevated agent privileges are required.
 - Each HTTP attempt has a five-second socket timeout and does not read the response body. Failed sends are logged and retried on the next cycle. Ctrl+C or SIGTERM requests shutdown; an in-flight sensor/network operation can finish before exit.
 - Agent variables are ordinary process environment variables; the agent does **not** read the server's `.env` file.
@@ -98,7 +98,7 @@ The existing `python agent/agent.py` command also works when its Python environm
 Point a kiosk browser (for example Fully Kiosk Browser or Chrome) at `http://<server-ip>:1200`. Configure fullscreen, keep-screen-on and reload-on-reconnect as needed. Admin works on a phone or desktop at `/admin`.
 
 - To-dos can be added, completed and deleted. The display shows the first five outstanding tasks and a count of additional items. New tasks are rejected at 50 rather than discarding old items.
-- Named long timers use days from now or a target date. Short timers use hours/minutes or the next occurrence of a clock time. Local wall times use `APP_TIMEZONE`; nonexistent DST times are rejected. Existing timers can be marked done, recolored or deleted in admin. New timers are rejected at 20. The API also retains legacy timer routes and pause/resume/reset/restart actions; the UI does not add those controls.
+- Named long timers use days from now or a target date. Short timers use hours/minutes or the next occurrence of a clock time. Local wall times use `APP_TIMEZONE`. Explicitly dated local times that do not exist during a DST transition are rejected; clock-only requests choose the next valid occurrence, skipping a missing occurrence. Existing timers can be marked done, recolored or deleted in admin. New timers are rejected at 20. The API also retains legacy timer routes and pause/resume/reset/restart actions; the UI does not add those controls.
 - The clock override changes only the displayed dashboard clock. Timers, freshness and calendar event instants continue using real server time.
 - Connect a calendar by pasting its secret iCal/ICS URL into admin. It is saved server-side and available only through authenticated settings, never in public snapshots. The display shows today's all-day and timed events, with live/past states. Recurrence, exclusions and overrides are parsed by `node-ical`; the timeline covers 14 days and next-event search is bounded to one year. Automatic calendar refresh is every 10 minutes.
 - A calendar URL can be saved even if its refresh fails. Admin reports that failure and keeps the draft; the server retries automatically. Changing the URL clears the old calendar's events; a failed refresh of the same URL retains its last successful events. Disconnect prevents a pending older fetch from restoring the calendar.
@@ -108,6 +108,8 @@ Point a kiosk browser (for example Fully Kiosk Browser or Chrome) at `http://<se
 ## Persistence, backups and recovery
 
 Admin changes finish saving before reporting success. Saves serialize, fsync a temporary file and atomically replace `db.json`; `db.json.bak` contains the previous successful snapshot. Telemetry and external caches checkpoint every 15 seconds, so abrupt shutdown can lose recent transient readings. The `.bak` file is a rotating previous snapshot, **not** a backup history. Keep separate backups of the whole data directory, which contains account hashes and private calendar settings.
+
+On upgrade, an older calendar cache with unknown source provenance is cleared once and rebuilt on refresh. Your settings, tasks, timers and accounts are retained.
 
 To take a consistent backup, stop the server (for Compose: `docker compose stop dashboard`), copy the entire configured data directory to a protected backup location, then restart. Do not run a second writer during backup or recovery. Keep backup permissions restricted.
 

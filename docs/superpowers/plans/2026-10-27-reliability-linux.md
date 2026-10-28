@@ -68,6 +68,6 @@
 
 ### Final verification
 
-- [ ] Independent whole-change review and fix material findings.
-- [ ] Run full suites, relevant syntax/config checks and real browser smoke checks with temporary data. Inspect final Git diff/status and leave changes on requested branch.
-- [ ] Summarize changes, verification, remaining limitations and suggested future additions; do not merge or publish.
+- [x] Independent whole-change review and fix material findings.
+- [x] Run full suites, relevant syntax/config checks and real browser smoke checks with temporary data. Inspect final Git diff/status and leave changes on requested branch.
+- [x] Summarize changes, verification, remaining limitations and suggested future additions; do not merge or publish.

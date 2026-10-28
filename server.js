@@ -32,6 +32,10 @@ const DATA_DIR = dataDir || process.env.DATA_DIR || path.join(__dirname, 'data')
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 
+function emptyCalendar(url) { return {next:null,upcoming:[],updatedAt:0,error:null,configured:!!url}; }
+// Internal provenance belongs outside the public calendar object. Never publish
+// the private source URL (or its fingerprint) in calendar/snapshot/SSE metadata.
+function calendarSource(url) { return crypto.createHash('sha256').update(url).digest('hex'); }
 function defaultDb() {
   return {
     todos: [
@@ -49,7 +53,8 @@ function defaultDb() {
     weather: { temp: null, code: null, label: '—', updatedAt: 0 },
     time: { offsetSec: 0, updatedAt: 0 }, // dashboard clock = real time + offset (set from /admin)
     settings: { icsUrl: '' }, // Google Calendar private ICS URL (set from /admin)
-    calendar: { next: null, upcoming: [], updatedAt: 0, error: null, configured: false },
+    calendar: emptyCalendar(''),
+    calendarSource: calendarSource(''),
     users: [] // { user, salt, hash, createdAt } — created via first-boot setup page
   };
 }
@@ -66,6 +71,13 @@ if (!db.time || typeof db.time.offsetSec !== 'number') { db.time = { offsetSec: 
 if (!db.settings || typeof db.settings.icsUrl !== 'string') { db.settings = { icsUrl: '' }; migrated = true; }
 if (!db.calendar || typeof db.calendar !== 'object') { db.calendar = { next: null, upcoming: [], updatedAt: 0, error: null, configured: false }; migrated = true; }
 if (!Array.isArray(db.calendar.upcoming)) { db.calendar.upcoming = []; migrated = true; }
+// Older snapshots have no trustworthy association between their URL and cache.
+// Discard only transient calendar data; retain settings, accounts and user data.
+if (db.calendarSource !== calendarSource(db.settings.icsUrl)) {
+  db.calendar = emptyCalendar(db.settings.icsUrl);
+  db.calendarSource = calendarSource(db.settings.icsUrl);
+  migrated = true;
+}
 // migrate old single long/short timer object -> named timers array
 if (db.timers && !Array.isArray(db.timers)) {
   const arr = [];
@@ -92,8 +104,12 @@ function transaction(fn) {
     const previous = JSON.parse(JSON.stringify(db));
     try { return await fn(); }
     catch (e) {
-      // Telemetry and cached external data can change while a durable write runs.
-      const {pc,weather,calendar} = db;
+      // Preserve external updates during writes only if they still belong to
+      // the restored source; a failed source change must restore its old cache.
+      const {pc,weather} = db;
+      const sourceChanged = db.calendarSource !== previous.calendarSource;
+      const calendar = sourceChanged ? previous.calendar : db.calendar;
+      if (sourceChanged) ++calendarGeneration;
       db = { ...previous, pc, weather, calendar };
       throw e;
     }
@@ -458,7 +474,7 @@ async function refreshCalendar() {
   const generation = ++calendarGeneration;
   const url = (db.settings.icsUrl || '').trim();
   if (!url) {
-    db.calendar = { next:null,upcoming:[],updatedAt:0,error:null,configured:false };
+    db.calendar = emptyCalendar('');
     broadcast('calendar',calendarState());
     return {ok:true};
   }
@@ -490,9 +506,12 @@ app.post('/api/settings', adminAuth, async (req,res,next) => {
     await transaction(async () => {
       const changed = db.settings.icsUrl !== icsUrl;
       db.settings.icsUrl = icsUrl;
-      await saveDb();
       ++calendarGeneration;
-      if (changed) db.calendar = {next:null,upcoming:[],updatedAt:0,error:null,configured:!!icsUrl};
+      if (changed) {
+        db.calendar = emptyCalendar(icsUrl);
+        db.calendarSource = calendarSource(icsUrl);
+      }
+      await saveDb();
     });
     // Fetch outside the mutation queue: disconnect/new URLs must supersede it.
     const result = await refreshCalendar();

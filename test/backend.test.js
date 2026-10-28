@@ -26,7 +26,7 @@ async function fixture(t,{initial,files,fetchImpl,env={}}={}) {
   const response=await fetch(url+route,{method,headers:{'content-type':'application/json',...(token?{authorization:'Bearer '+token}:{})},body:body===undefined?undefined:JSON.stringify(body)});
   return {status:response.status,body:await response.json()};
  }
- return {dir,request,async setup(){const r=await request('/api/setup','POST',{user:'owner',pass:'test-password'});token=r.body.token;return r}};
+ return {dir,request,async login(){const r=await request('/api/login','POST',{user:'owner',pass:'test-password'});token=r.body.token;return r},async setup(){const r=await request('/api/setup','POST',{user:'owner',pass:'test-password'});token=r.body.token;return r}};
 }
 test('corrupt primary recovers backup without overwriting accounts',async t=>{
  const backup={users:[{user:'saved',salt:'salt',hash:'hash'}],todos:[],timers:[],pc:{},weather:{}};
@@ -180,4 +180,140 @@ test('short duration targets outside Date range reject on current legacy and res
  const reset=(await f.request('/api/timers/'+timer.id,'PATCH',{action:'reset'})).body;
  assert.equal((await f.request('/api/timers/'+timer.id,'PATCH',{action:'restart',hours:3000000000,name:'Should not stick'})).status,400);
  assert.deepEqual((await f.request('/api/timers')).body.find(x=>x.id===timer.id),reset);
+});
+
+test('current and legacy long timers accept gap dates while rejecting nonexistent datetimes',async t=>{
+ const f=await fixture(t);await f.setup();
+ for(const route of ['/api/timers','/api/timers/long']) {
+  for(const [date,expected] of [['2026-04-24','2026-04-23T22:00:00Z'],['2026-04-23','2026-04-22T22:00:00Z']]) {
+   const result=await f.request(route,'POST',{name:'Date '+date,label:'Date '+date,date});
+   assert.equal(result.status,200,route+' '+date);assert.equal(result.body.targetAt,Date.parse(expected));
+  }
+  for(const date of ['2026-02-30','2026-04-24T00:30']) assert.equal((await f.request(route,'POST',{name:'Invalid',date})).status,400);
+ }
+});
+
+function calendarFeed(summary) {
+ // An ongoing daily occurrence keeps this integration fixture independent of today's date.
+ return `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:cache\r\nDTSTART:20200101T000000Z\r\nDTEND:20200102T000000Z\r\nRRULE:FREQ=DAILY\r\nSUMMARY:${summary}\r\nEND:VEVENT\r\nEND:VCALENDAR`;
+}
+const sourceA='https://calendar.test/private-A/calendar.ics';
+const sourceB='https://calendar.test/private-B/calendar.ics';
+async function savedDb(f) {return JSON.parse(await fsp.readFile(path.join(f.dir,'db.json'),'utf8'));}
+
+for(const replacement of [sourceB,'']) test(`calendar source ${replacement ? 'replacement' : 'disconnect'} is durable before the next checkpoint`,async t=>{
+ const f=await fixture(t,{fetchImpl:async url=>{
+  if(url===sourceA) return {ok:true,text:async()=>calendarFeed('Source A only')};
+  throw new Error('offline '+url);
+ }});await f.setup();
+ assert.equal((await f.request('/api/settings','POST',{icsUrl:sourceA})).status,200);
+ await f.request('/api/todos','POST',{text:'Persist source A cache'});
+ assert.equal((await savedDb(f)).calendar.next.summary,'Source A only');
+ assert.equal((await f.request('/api/settings','POST',{icsUrl:replacement})).status,replacement?502:200);
+ const stored=await savedDb(f);
+ assert.equal(stored.settings.icsUrl,replacement);assert.equal(stored.calendar.next,null);assert.deepEqual(stored.calendar.upcoming,[]);
+ const restarted=await fixture(t,{initial:stored});
+ const publicState=(await restarted.request('/api/calendar')).body;
+ assert.equal(publicState.next,null);assert.equal(publicState.configured,!!replacement);
+ // Log in to the restored account and retry the unavailable replacement source.
+ const login=await restarted.login();assert.equal(login.status,200);
+ assert.equal((await restarted.request('/api/settings','POST',{icsUrl:replacement})).status,replacement?502:200);
+ assert.equal((await restarted.request('/api/calendar')).body.next,null);
+ assert.equal((await restarted.request('/api/todos')).body.some(x=>x.text==='Persist source A cache'),true);
+ assert.equal(JSON.stringify((await restarted.request('/api/snapshot')).body).includes('private-'),false);
+});
+
+test('unknown persisted calendar provenance is discarded without losing accounts or tasks',async t=>{
+ const f=await fixture(t);await f.setup();
+ await f.request('/api/todos','POST',{text:'Keep this task'});
+ const stored=await savedDb(f);delete stored.calendarSource;
+ stored.settings.icsUrl=sourceB;stored.calendar={next:{summary:'Unknown source'},upcoming:[{summary:'Unknown source'}],updatedAt:Date.now(),configured:true};
+ const restarted=await fixture(t,{initial:stored});
+ assert.equal((await restarted.request('/api/calendar')).body.next,null);
+ assert.equal((await restarted.request('/api/me')).body.needsSetup,false);
+ assert.equal((await restarted.request('/api/todos')).body.some(x=>x.text==='Keep this task'),true);
+ assert.equal((await savedDb(restarted)).settings.icsUrl,sourceB);
+});
+
+test('failed same-source refresh retains its cache across restart',async t=>{
+ let offline=false;
+ const f=await fixture(t,{fetchImpl:async()=>{
+  if(offline)throw new Error('offline');return {ok:true,text:async()=>calendarFeed('Saved source A')};
+ }});await f.setup();
+ await f.request('/api/settings','POST',{icsUrl:sourceA});
+ offline=true;
+ assert.equal((await f.request('/api/settings','POST',{icsUrl:sourceA})).status,502);
+ assert.equal((await f.request('/api/calendar')).body.next.summary,'Saved source A');
+ const restarted=await fixture(t,{initial:await savedDb(f)});await restarted.login();
+ assert.equal((await restarted.request('/api/settings','POST',{icsUrl:sourceA})).status,502);
+ assert.equal((await restarted.request('/api/calendar')).body.next.summary,'Saved source A');
+});
+
+for(const replacement of [sourceB,'']) test(`failed calendar ${replacement ? 'replacement' : 'disconnect'} write restores saved source/cache and preserves concurrent telemetry/weather`,async t=>{
+ const f=await fixture(t,{fetchImpl:async url=>String(url).includes('open-meteo')
+  ? {ok:true,json:async()=>({current:{temperature_2m:24,weather_code:0}})}
+  : {ok:true,text:async()=>calendarFeed('Saved source A')}
+ });await f.setup();
+ await f.request('/api/settings','POST',{icsUrl:sourceA});
+ await f.request('/api/todos','POST',{text:'Checkpoint'});
+ const before=await savedDb(f),beforeCalendar=(await f.request('/api/calendar')).body;
+ let release,entered;
+ const started=new Promise(resolve=>{entered=resolve});
+ const gate=new Promise(resolve=>{release=resolve});
+ const realOpen=fsp.open;
+ const mocked=t.mock.method(fsp,'open',async function(file,...args){
+  if(String(file).startsWith(path.join(f.dir,'db.json.bak.tmp-'))) {
+   entered();await gate;throw new Error('Injected write failure');
+  }
+  return realOpen.call(this,file,...args);
+ });
+ const changing=f.request('/api/settings','POST',{icsUrl:replacement});
+ await started;
+ try {
+  await f.request('/api/pc','POST',{cpu:37,ram:44});
+  assert.equal((await f.request('/api/weather')).body.temp,24);
+ } finally {release();}
+ assert.equal((await changing).status,500);mocked.mock.restore();
+ assert.equal((await f.request('/api/settings')).body.icsUrl,sourceA);
+ assert.deepEqual((await f.request('/api/calendar')).body,beforeCalendar);
+ assert.deepEqual(await savedDb(f),before);
+ assert.equal((await f.request('/api/pc')).body.cpu,37);
+ assert.equal((await f.request('/api/snapshot')).body.weather.temp,24);
+ await f.request('/api/todos','POST',{text:'After rollback'});
+ assert.equal((await savedDb(f)).calendar.next.summary,'Saved source A');
+});
+
+test('superseded old-source fetch cannot repopulate a replacement cache',async t=>{
+ let finish,entered;
+ const started=new Promise(resolve=>{entered=resolve});
+ const f=await fixture(t,{fetchImpl:async url=>{
+  if(url===sourceA) return new Promise(resolve=>{finish=()=>resolve({ok:true,text:async()=>calendarFeed('Late source A')});entered();});
+  throw new Error('B unavailable');
+ }});await f.setup();
+ const old=f.request('/api/settings','POST',{icsUrl:sourceA});await started;
+ assert.equal((await f.request('/api/settings','POST',{icsUrl:sourceB})).status,502);
+ finish();assert.equal((await old).status,409);
+ assert.equal((await f.request('/api/calendar')).body.next,null);
+ assert.equal((await savedDb(f)).calendar.next,null);
+ assert.equal((await savedDb(f)).settings.icsUrl,sourceB);
+});
+
+test('a failed source change does not revive an older fetch after rollback restores its URL',async t=>{
+ let defer=false,finish,entered;
+ const started=new Promise(resolve=>{entered=resolve});
+ const f=await fixture(t,{fetchImpl:async()=>{
+  if(defer) return new Promise(resolve=>{finish=()=>resolve({ok:true,text:async()=>calendarFeed('Late refresh')});entered();});
+  return {ok:true,text:async()=>calendarFeed('Saved source A')};
+ }});await f.setup();
+ await f.request('/api/settings','POST',{icsUrl:sourceA});
+ defer=true;
+ const old=f.request('/api/settings','POST',{icsUrl:sourceA});await started;
+ const before=await savedDb(f);
+ await fsp.rename(f.dir,f.dir+'.saved');t.after(()=>fsp.rm(f.dir+'.saved',{recursive:true,force:true}));
+ await fsp.writeFile(f.dir,'blocked');
+ assert.equal((await f.request('/api/settings','POST',{icsUrl:sourceB})).status,500);
+ finish();assert.equal((await old).status,409);
+ assert.equal((await f.request('/api/settings')).body.icsUrl,sourceA);
+ assert.equal((await f.request('/api/calendar')).body.next.summary,'Saved source A');
+ assert.deepEqual(JSON.parse(await fsp.readFile(path.join(f.dir+'.saved','db.json'),'utf8')),before);
 });
