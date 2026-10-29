@@ -4,6 +4,8 @@ import json
 import logging
 import math
 import os
+from pathlib import Path
+import sys
 import signal
 import subprocess
 import threading
@@ -22,6 +24,79 @@ DISK_EVERY_SEC = 3 * 3600
 GPU_TIMEOUT_SEC = 2
 HTTP_TIMEOUT_SEC = 5
 _DEFAULT_PSUTIL = object()
+_DEFAULT_NATIVE = object()
+
+
+def load_env(path=None, environ=None):
+    """Load agent/.env at startup only, preserving process/service settings."""
+    environ = os.environ if environ is None else environ
+    path = Path(__file__).with_name('.env') if path is None else Path(path)
+    try:
+        for raw in path.read_text(encoding='utf-8-sig').splitlines():
+            line = raw.strip()
+            if not line or line.startswith('#') or '=' not in line:
+                continue
+            key, value = (item.strip() for item in line.split('=', 1))
+            if key not in ('SERVER', 'INTERVAL', 'MEDIA_ENABLED'):
+                continue
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+                value = value[1:-1]
+            environ.setdefault(key, value)
+    except FileNotFoundError:
+        pass
+    except (OSError, UnicodeError):
+        LOG.warning('Cannot read agent environment file')
+
+
+class WindowsNative:
+    """Bounded CIM fallback for Windows installations without psutil."""
+    def __init__(self, run_command=None):
+        self.run_command = subprocess.run if run_command is None else run_command
+
+    def _query(self, command):
+        try:
+            result = self.run_command(
+                ['powershell', '-NoProfile', '-NonInteractive', '-Command', command],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+                timeout=2, check=True,
+            )
+            if len(result.stdout) > 65536:
+                return None
+            return json.loads(result.stdout)
+        except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+            return None
+
+    def system(self):
+        data = self._query(
+            '$cpu=(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average; '
+            '$os=Get-CimInstance Win32_OperatingSystem; '
+            '@{cpu=$cpu;total=$os.TotalVisibleMemorySize;free=$os.FreePhysicalMemory} | ConvertTo-Json -Compress'
+        )
+        if not isinstance(data, dict):
+            return None, None
+        cpu = measurement(data.get('cpu'), 0, 100)
+        total, free = measurement(data.get('total')), measurement(data.get('free'))
+        ram = measurement((total - free) / total * 100, 0, 100) if total and free is not None and free <= total else None
+        return cpu, ram
+
+    def disks(self):
+        data = self._query(
+            '(Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | '
+            'Select-Object DeviceID,FreeSpace,Size | ConvertTo-Json -Compress)'
+        )
+        if isinstance(data, dict):
+            data = [data]
+        disks = []
+        for row in data if isinstance(data, list) else []:
+            if not isinstance(row, dict):
+                continue
+            mount = row.get('DeviceID')
+            total, free = measurement(row.get('Size')), measurement(row.get('FreeSpace'))
+            if not isinstance(mount, str) or not mount or not total or free is None or free > total:
+                continue
+            disks.append({'mount': mount, 'pct': round((total - free) / total * 100, 1),
+                          'freeGb': round(free / 1e9, 1), 'totalGb': round(total / 1e9, 1)})
+        return disks
 
 
 def measurement(value, minimum=0, maximum=None):
@@ -83,9 +158,10 @@ def probe_gpu(run_command=None):
 
 class Sampler:
     def __init__(self, psutil_module=_DEFAULT_PSUTIL, run_command=None,
-                 wall_clock=time.time, monotonic=time.monotonic):
+                 wall_clock=time.time, monotonic=time.monotonic, native=_DEFAULT_NATIVE):
         self.psutil = psutil if psutil_module is _DEFAULT_PSUTIL else psutil_module
         self.run_command = run_command
+        self.native = (WindowsNative(run_command) if sys.platform == 'win32' else None) if native is _DEFAULT_NATIVE else native
         self.wall_clock = wall_clock
         self.monotonic = monotonic
         self.cpu_primed = False
@@ -141,6 +217,8 @@ class Sampler:
                                   'totalGb': round(total / 1e9, 1) if total is not None else None})
                 except Exception as exc:
                     LOG.debug('Disk unavailable: %s', exc)
+        elif self.native is not None:
+            disks = self.native.disks()
         self.disk_sample, self.disk_checked_at = disks, now
         return list(disks)
 
@@ -155,6 +233,8 @@ class Sampler:
             ram = self._read(lambda: self.psutil.virtual_memory().percent, 0, 100)
             cpu_temp = self._cpu_temperature()
             uptime = self._read(lambda: self.wall_clock() - self.psutil.boot_time())
+        elif self.native is not None:
+            cpu, ram = self.native.system()
         gpu, gpu_temp = probe_gpu(self.run_command)
         sample = {'cpu': cpu, 'ram': ram, 'gpu': gpu, 'cpuTemp': cpu_temp,
                   'gpuTemp': gpu_temp, 'uptimeSec': uptime, 'disks': self._disks()}
@@ -163,11 +243,11 @@ class Sampler:
         return sample
 
 
-def post(server, payload, opener=None):
+def post(server, payload, opener=None, path='/api/pc'):
     opener = urllib.request.urlopen if opener is None else opener
     try:
         data = json.dumps(payload, allow_nan=False).encode('utf-8')
-        request = urllib.request.Request(server + '/api/pc', data=data, headers={'Content-Type': 'application/json'})
+        request = urllib.request.Request(server + path, data=data, headers={'Content-Type': 'application/json'})
         with opener(request, timeout=HTTP_TIMEOUT_SEC) as response:
             if not 200 <= response.status < 300:
                 LOG.warning('Telemetry rejected: HTTP %s', response.status)
@@ -192,15 +272,19 @@ def run(config, sampler, stop, sender=post):
         stop.wait(config.interval)
 
 
-def main():
+def main(windows_media=False):
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+    load_env()
     try:
         config = Config.from_env()
     except ValueError as exc:
         LOG.error('%s', exc)
         return 2
     if psutil is None:
-        LOG.warning('psutil is not installed; CPU/RAM/disks/uptime will be unavailable. Install agent/requirements.txt')
+        if sys.platform != 'win32':
+            LOG.error('psutil is required on Linux; install agent/requirements.txt')
+            return 2
+        LOG.warning('psutil is not installed; using bounded Windows CPU/RAM/disk fallback')
     LOG.info('Agent reporting to %s every %gs; one reporting machine per dashboard', config.server, config.interval)
     stop = threading.Event()
     previous_handlers = {}
@@ -208,11 +292,26 @@ def main():
         stop.set()
     for signum in (signal.SIGINT, signal.SIGTERM):
         previous_handlers[signum] = signal.signal(signum, shutdown)
+    worker = None
+    if windows_media and os.environ.get('MEDIA_ENABLED', '1').strip().lower() not in ('0', 'false', 'no'):
+        if __package__:
+            from .media import create_reporter
+        else:
+            from media import create_reporter
+        try:
+            reporter = create_reporter(config.server)
+            if reporter is not None:
+                worker = reporter.start(stop)
+        except Exception:
+            LOG.warning('Optional media startup failed; PC telemetry continues', exc_info=True)
     try:
         run(config, Sampler(), stop)
     except KeyboardInterrupt:
         stop.set()
     finally:
+        stop.set()
+        if worker is not None:
+            worker.close()
         for signum, handler in previous_handlers.items():
             signal.signal(signum, handler)
         LOG.info('Agent stopped')

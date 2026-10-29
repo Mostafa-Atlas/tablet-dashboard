@@ -13,7 +13,7 @@ async function fixture(t,{initial,files,fetchImpl,env={}}={}) {
  for(const key of Object.keys(original)) delete process.env[key];
  Object.assign(process.env,env);
  let dashboard;
- try { dashboard=require('../server').createDashboard({dataDir:dir,fetchImpl:fetchImpl || (async()=>{throw new Error('offline fixture')})}); await dashboard.ready; }
+ try { dashboard=require('../server').createDashboard({dataDir:dir,pcAllowIp:'127.0.0.1',fetchImpl:fetchImpl || (async()=>{throw new Error('offline fixture')})}); await dashboard.ready; }
  finally { for(const [key,value] of Object.entries(original)) {if(value===undefined) delete process.env[key];else process.env[key]=value;} }
  t.after(()=>dashboard.stopBackground());
  const {app}=dashboard;
@@ -54,6 +54,43 @@ test('failed durable mutation returns error and retains existing state',async t=
  await fsp.writeFile(f.dir,'blocked');
  assert.equal((await f.request('/api/todos','POST',{text:'must not appear'})).status,500);
  assert.deepEqual((await f.request('/api/todos')).body,before);
+});
+for(const restoreFailure of [false,true]) test(`directory sync EIO ${restoreFailure?'with failed restoration reports uncertain commit':'rejects with consistent memory disk and restart'}`,async t=>{
+ const f=await fixture(t);await f.setup();
+ const file=path.join(f.dir,'db.json'),before=JSON.parse(await fsp.readFile(file,'utf8'));
+ async function restartTodos(){
+  const restarted=require('../server').createDashboard({dataDir:f.dir,pcAllowIp:'127.0.0.1',fetchImpl:async()=>{throw new Error('offline fixture')}});
+  await restarted.ready;t.after(()=>restarted.stopBackground());
+  const server=restarted.app.listen(0,'127.0.0.1');
+  await new Promise((resolve,reject)=>{server.once('listening',resolve);server.once('error',reject)});
+  t.after(()=>new Promise(resolve=>server.close(resolve)));
+  return (await fetch(`http://127.0.0.1:${server.address().port}/api/todos`)).json();
+ }
+ const open=fsp.open,rename=fsp.rename;let primaryRenames=0;
+ t.mock.method(fsp,'open',async function(name,...args){
+  const handle=await open.call(this,name,...args);
+  if(name===f.dir)handle.sync=async()=>{throw Object.assign(new Error('directory sync EIO'),{code:'EIO'})};
+  return handle;
+ });
+ if(restoreFailure)t.mock.method(fsp,'rename',async function(from,to){
+  if(to===file && ++primaryRenames===2)throw Object.assign(new Error('restore rename EIO'),{code:'EIO'});
+  return rename.call(this,from,to);
+ });
+ const result=await f.request('/api/todos','POST',{text:'uncertain task'});
+ assert.equal(result.status,restoreFailure?503:500);
+ if(restoreFailure){assert.equal(result.body.saveState,'uncertain');assert.match(result.body.error,/reload/i);}
+ const memory=(await f.request('/api/todos')).body;
+ const disk=JSON.parse(await fsp.readFile(file,'utf8'));
+ assert.equal(memory.some(item=>item.text==='uncertain task'),restoreFailure);
+ assert.equal(disk.todos.some(item=>item.text==='uncertain task'),restoreFailure);
+ assert.deepEqual(await restartTodos(),memory,'a new dashboard must read the same task state immediately after failure');
+ if(!restoreFailure)assert.deepEqual(disk,before);
+ t.mock.restoreAll();
+ assert.equal((await f.request('/api/todos','POST',{text:'next saved task'})).status,200);
+ const backup=JSON.parse(await fsp.readFile(file+'.bak','utf8'));
+ assert.deepEqual(backup,disk,'next backup must contain the actual pre-save primary');
+ assert.deepEqual(await restartTodos(),(await f.request('/api/todos')).body,'restart after the next save must retain the same state');
+ assert.equal((await restartTodos()).some(item=>item.text==='next saved task'),true);
 });
 test('timer routes reject invalid wall times/durations and timezone datetime is Cairo',async t=>{
  const f=await fixture(t);await f.setup();

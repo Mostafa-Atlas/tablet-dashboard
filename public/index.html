@@ -14,13 +14,58 @@
       <span id="date">—</span>
     </div>
     <div class="tb-right">
-      <span id="weather">--°C —</span>
-      <span id="server-state" class="pill" role="status">Server connecting…</span>
+      <span id="weather" class="weather-summary">
+        <svg id="weather-icon" viewBox="0 0 48 48" aria-hidden="true" hidden><use id="weather-icon-use" href="/icons/weather.svg#cloudy"></use></svg>
+        <span class="weather-copy"><span id="weather-text">—</span><span class="weather-sub"><span id="weather-extra" hidden></span></span></span>
+      </span>
+      <span id="server-state" role="status" class="pill bad">CONNECTING</span>
       <span id="pc-state" class="pill">PC …</span>
     </div>
   </header>
 
+  <div id="alarm-banner" class="alarm-banner" role="alert" hidden>
+    <div><strong id="alarm-title">Reminder</strong><span id="alarm-detail"></span><span id="alarm-sound-help" hidden> · Sound blocked by browser</span></div>
+    <div class="alarm-actions"><button id="alarm-enable" type="button" hidden>Enable sound</button><button class="alarm-snooze" data-minutes="5" type="button">Snooze 5m</button><button class="alarm-snooze" data-minutes="10" type="button">10m</button><button class="alarm-snooze" data-minutes="30" type="button">30m</button><button id="alarm-dismiss" type="button">Dismiss</button></div>
+  </div>
+
+  <section id="next-card" class="next-card" aria-label="Up next" hidden>
+    <div class="next-top"><span class="next-kicker">UP NEXT</span><button id="next-close" type="button" aria-label="Dismiss up next">×</button></div>
+    <div class="next-content"><strong id="next-title"></strong><span id="next-countdown"></span></div>
+    <span id="next-detail"></span>
+  </section>
+
   <main id="grid">
+    <div id="life-column">
+      <section class="card" id="note-section" hidden><h2>Pinned note</h2><p id="pinned-note"></p></section>
+      <section class="card" id="life-card">
+        <div id="today-section">
+          <h2>Today</h2>
+          <div id="event" class="tl-wrap"><span class="dim">Loading…</span></div>
+        </div>
+        <div id="todo-section">
+          <h2 class="mt">To-Do</h2>
+          <div id="missed-summary" class="missed-summary" hidden></div>
+          <ul id="todos"><li class="dim">Loading…</li></ul>
+        </div>
+      </section>
+    </div>
+
+    <div id="mid-column">
+      <section class="card" id="media-card" hidden>
+        <h2>Now playing</h2>
+        <div class="media-row">
+          <img id="media-art" alt="" hidden />
+          <div class="media-meta"><div id="media-title"></div><div id="media-artist" class="dim"></div><div id="media-app" class="dim"></div></div>
+        </div>
+      </section>
+
+      <section class="card center" id="timer-card">
+        <h2 class="left">Timers</h2>
+        <div id="timers"><div class="dim">Loading…</div></div>
+      </section>
+    </div>
+
+    <div id="pc-column">
     <section class="card" id="pc-card">
       <h2>PC Status</h2>
       <div class="stat"><label>CPU <b id="cpu-v">–</b></label><div class="bar"><i id="cpu-b"></i></div></div>
@@ -31,21 +76,11 @@
       <div id="disks"><div class="dim sub">Waiting for agent…</div></div>
       <div class="sub dim" id="pc-age"></div>
     </section>
-
-    <section class="card center" id="timer-card">
-      <h2 class="left">Timers</h2>
-      <div id="timers"><div class="dim">Loading…</div></div>
-      <div class="sub dim">Manage from /admin</div>
-    </section>
-
-    <section class="card" id="life-card">
-      <h2>To-Do</h2>
-      <ul id="todos"><li class="dim">Loading…</li></ul>
-      <h2 class="mt">Today</h2>
-      <div id="event" class="tl-wrap"><span class="dim">Loading…</span></div>
-    </section>
+    <section class="card" id="routine-section" hidden><h2>Routine</h2><div id="routines"></div></section>
+    </div>
   </main>
 </div>
+<audio id="alarm-audio" src="/audio/alarm.mp3" preload="none" loop></audio>
 <script src="js/common.js"></script>
 <script src="js/kiosk.js"></script>
 </body>

@@ -24,3 +24,25 @@ test('missing primary restores existing backup instead of first boot',async t=>{
  const {file}=await files(t);await fs.writeFile(file+'.bak',JSON.stringify({users:[{user:'saved',salt:'s',hash:'h'}],todos:[],timers:[]}));
  const store=createStore(file,()=>({users:[]}));assert.equal(store.value.users[0].user,'saved');
 });
+for(const failure of ['open','sync','close']) test(`post-rename directory ${failure} failure restores primary and next backup`,async t=>{
+ const {dir,file}=await files(t);const initial={users:[],todos:[{text:'initial'}],timers:[]};
+ const store=createStore(file,()=>initial);
+ const before={...initial,todos:[{text:'before rejection'}]};await store.save(before);
+ const open=fs.open;
+ t.mock.method(fs,'open',async function(name,...args){
+  if(name!==dir)return open.call(this,name,...args);
+  if(failure==='open')throw Object.assign(new Error('directory open EIO'),{code:'EIO'});
+  const handle=await open.call(this,name,...args);
+  if(failure==='sync')handle.sync=async()=>{throw Object.assign(new Error('directory sync EIO'),{code:'EIO'})};
+  if(failure==='close'){const close=handle.close.bind(handle);handle.close=async()=>{await close();throw Object.assign(new Error('directory close EIO'),{code:'EIO'})};}
+  return handle;
+ });
+ await assert.rejects(store.save({...initial,todos:[{text:'rejected'}]}),/directory .* EIO/);
+ assert.deepEqual(JSON.parse(await fs.readFile(file,'utf8')),before,'immediate primary must agree with rejection');
+ assert.deepEqual(createStore(file,()=>{throw new Error('must not reset')}).value,before,'restart must not resurrect rejection');
+ t.mock.restoreAll();
+ const after={...initial,todos:[{text:'after rejection'}]};await store.save(after);
+ assert.deepEqual(JSON.parse(await fs.readFile(file,'utf8')),after);
+ assert.deepEqual(JSON.parse(await fs.readFile(file+'.bak','utf8')),before,'backup must never rotate the rejected snapshot');
+ assert.equal((await fs.readdir(dir)).some(name=>name.includes('.tmp-')),false);
+});

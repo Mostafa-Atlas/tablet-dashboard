@@ -7,11 +7,15 @@ const fs = require('fs');
 const ics = require('./lib/ics');
 const { createStore } = require('./lib/storage');
 const time = require('./lib/time');
+const features = require('./lib/features');
 
-function createDashboard({ dataDir, fetchImpl = fetch, background = false } = {}) {
+function createDashboard({ dataDir, fetchImpl = fetch, background = false, pcAllowIp = process.env.PC_ALLOW_IP || '192.168.50.2' } = {}) {
 
 // ---- Config ----
 const TIME_ZONE = process.env.APP_TIMEZONE || 'Africa/Cairo';
+const { dayKey, weekKey, addDays, timestamp: scheduleTimestamp, done: todoDone, todoDueAt } = features.createSchedule(TIME_ZONE);
+const validDueAt = value => features.dueAt(value, TIME_ZONE);
+const { validDueTime } = features;
 new Intl.DateTimeFormat('en', { timeZone: TIME_ZONE });
 const intervals = [];
 function every(fn, delay) { intervals.push(setInterval(fn, delay)); }
@@ -50,12 +54,13 @@ function defaultDb() {
       cpu: null, ram: null, gpu: null, gpuTemp: null, cpuTemp: null,
       uptimeSec: null, disks: [], updatedAt: 0
     },
-    weather: { temp: null, code: null, label: '—', updatedAt: 0 },
+    weather: { temp: null, code: null, label: '—', isDay: null, high: null, low: null, rainChance: null, updatedAt: 0 },
     time: { offsetSec: 0, updatedAt: 0 }, // dashboard clock = real time + offset (set from /admin)
     settings: { icsUrl: '' }, // Google Calendar private ICS URL (set from /admin)
     calendar: emptyCalendar(''),
     calendarSource: calendarSource(''),
-    users: [] // { user, salt, hash, createdAt } — created via first-boot setup page
+    users: [], // { user, salt, hash, createdAt } — created via first-boot setup page
+    display: { ...features.DEFAULT_DISPLAY }, note: { text: '', updatedAt: 0 }, routines: []
   };
 }
 
@@ -97,6 +102,7 @@ if (db.timers && !Array.isArray(db.timers)) {
   }
   db.timers = arr; migrated = true;
 }
+migrated = features.normalizeFeatures(db, TIME_ZONE) || migrated;
 function saveDb() { return store.save(db); }
 let mutationQueue = Promise.resolve();
 function transaction(fn) {
@@ -104,6 +110,9 @@ function transaction(fn) {
     const previous = JSON.parse(JSON.stringify(db));
     try { return await fn(); }
     catch (e) {
+      // If restoring the installed primary failed, a memory rollback would
+      // contradict both disk and restart state. The API reports uncertainty.
+      if (e.storageCommitted) throw e;
       // Preserve external updates during writes only if they still belong to
       // the restored source; a failed source change must restore its old cache.
       const {pc,weather} = db;
@@ -249,12 +258,18 @@ app.get('/api/stream', (req, res) => {
 });
 
 function snapshot() {
-  return { now: Date.now(), timeZone: TIME_ZONE, pc: db.pc, todos: db.todos, timers: db.timers, weather: weatherState(), time: db.time, calendar: calendarState() };
+  return { now: Date.now(), timeZone: TIME_ZONE, pc: db.pc, todos: todosForClient(), timers: sortTimers(db.timers), weather: weatherState(), time: db.time, calendar: calendarState(), display: db.display, note: db.note, routines: routinesForClient(), media: mediaState() };
 }
 app.get('/api/snapshot', (req, res) => res.json(snapshot()));
 
 // ---- PC stats: agent POSTs here every ~2s ----
-app.post('/api/pc', (req, res) => {
+function allowedPeer(req, res, next) {
+  const raw = req.socket?.remoteAddress || '';
+  const ip = raw.startsWith('::ffff:') ? raw.slice(7) : raw;
+  if (ip !== pcAllowIp) return res.status(403).json({ error: 'PC not allowed' });
+  next();
+}
+app.post('/api/pc', allowedPeer, (req, res) => {
   const b = req.body || {};
   const nullable = (value,min,max) => typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max ? value : null;
   const disks = (Array.isArray(b.disks) ? b.disks : []).filter(d => d && typeof d === 'object' && typeof d.mount === 'string' && d.mount.trim() && nullable(d.pct,0,100) !== null).slice(0,8).map(d => ({
@@ -275,29 +290,221 @@ app.post('/api/pc', (req, res) => {
 });
 app.get('/api/pc', (req, res) => res.json(db.pc));
 
+let media = { playing: false, title: null, artist: null, album: null, app: null, thumb: null, updatedAt: 0 };
+function mediaKey(m) { return [(m.title || ''), (m.artist || ''), (m.album || '')].join('\n'); }
+function mediaState() {
+  const stale = !media.updatedAt || Date.now() - media.updatedAt > 30000;
+  return { ...media, playing: stale ? false : media.playing, stale, ttlMs: 30000 };
+}
+app.post('/api/now-playing', allowedPeer, (req, res) => {
+  const b = req.body || {};
+  const str = (v, n) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, n) : null);
+  const next = {
+    playing: b.playing === true,
+    title: str(b.title, 120), artist: str(b.artist, 120),
+    album: str(b.album, 120), app: str(b.app, 80),
+    thumb: null, updatedAt: Date.now()
+  };
+  if (typeof b.thumb === 'string' && /^data:image\/(?:jpeg|jpg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/i.test(b.thumb) && b.thumb.length < 250000) {
+    next.thumb = b.thumb;
+  } else if (mediaKey(next) === mediaKey(media)) {
+    next.thumb = media.thumb; // metadata-only refresh: keep the art
+  }
+  media = next;
+  broadcast('media', mediaState());
+  res.json({ ok: true });
+});
+app.get('/api/now-playing', (req, res) => res.json(mediaState()));
+
 // ---- Todos ----
-app.get('/api/todos', (req, res) => res.json(db.todos));
+function todosForClient() {
+  return [...db.todos].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    .map(t => ({ ...t, done: todoDone(t), dueAt: todoDueAt(t) }));
+}
+function rolloverTodos() {
+  const key = dayKey();
+  if (rolloverTodos.last === key) return;
+  rolloverTodos.last = key;
+  if (db.todos.some(t => t.repeat && t.repeat !== 'none')) broadcast('todos', todosForClient());
+  if (db.routines.length) broadcast('routines', routinesForClient());
+}
+function broadcastTodos() { broadcast('todos', todosForClient()); }
+
+app.get('/api/todos', (req, res) => res.json(todosForClient()));
 app.post('/api/todos', adminAuth, mutation(async (req, res) => {
+  try { features.validateTodo(req.body, TIME_ZONE); } catch (e) { return res.status(400).json({ error: e.message }); }
   const text = String(req.body.text || '').trim().slice(0, 200);
   if (!text) return res.status(400).json({ error: 'text required' });
-  const item = { id: crypto.randomUUID(), text, done: false, createdAt: Date.now() };
+  const repeat = ['none', 'daily', 'weekly'].includes(req.body.repeat) ? req.body.repeat : 'none';
+  const dueAt = validDueAt(req.body.dueAt ?? null);
+  if (dueAt === undefined || !validDueTime(req.body.dueTime ?? '')) return res.status(400).json({ error: 'Invalid due date or time' });
+  const dueWeekday = Number(req.body.dueWeekday ?? 0);
+  if (!Number.isInteger(dueWeekday) || dueWeekday < 0 || dueWeekday > 6) return res.status(400).json({ error: 'Invalid weekday' });
+  const item = { id: crypto.randomUUID(), text, done: false, repeat, doneOn: null,
+    dueAt: repeat === 'none' ? dueAt : null, dueTime: repeat === 'none' ? null : (req.body.dueTime || null), dueWeekday,
+    priority: ['high', 'normal', 'low'].includes(req.body.priority) ? req.body.priority : 'normal',
+    order: Math.min(0, ...db.todos.map(t => t.order ?? 0)) - 1, createdAt: Date.now() };
   if (db.todos.length >= 50) return res.status(409).json({ error: 'Task limit reached (50); delete an item first' });
   db.todos.unshift(item);
-  await saveDb(); broadcast('todos', db.todos);
-  res.json(item);
+
+  await saveDb(); broadcastTodos();
+  res.json({ ...item, done: todoDone(item), dueAt: todoDueAt(item) });
 }));
 app.patch('/api/todos/:id', adminAuth, mutation(async (req, res) => {
+  try { features.validateTodo(req.body, TIME_ZONE); } catch (e) { return res.status(400).json({ error: e.message }); }
   const t = db.todos.find(x => x.id === req.params.id);
   if (!t) return res.status(404).json({ error: 'not found' });
-  if (typeof req.body.done === 'boolean') t.done = req.body.done;
-  if (typeof req.body.text === 'string') t.text = req.body.text.slice(0, 200);
-  await saveDb(); broadcast('todos', db.todos);
-  res.json(t);
+  if (req.body.action === 'moveToday' || req.body.action === 'moveTomorrow') {
+    if ((t.repeat && t.repeat !== 'none') || todoDone(t) || !Number.isFinite(t.dueAt) || t.dueAt >= Date.now()) {
+      return res.status(409).json({ error: 'Only overdue one-time tasks can be rescheduled here' });
+    }
+    if (req.body.action === 'moveToday') {
+      const endOfToday = time.calendarDay(addDays(dayKey(), 1), TIME_ZONE);
+      const target = Math.min(Date.now() + 3600000, endOfToday - 60000);
+      if (target <= Date.now() + 60000) return res.status(409).json({ error: 'Too late today; choose tomorrow or Schedule' });
+      t.dueAt = target;
+    } else t.dueAt = scheduleTimestamp(addDays(dayKey(), 1), '09:00');
+    await saveDb(); broadcastTodos();
+    return res.json({ ...t, dueAt: todoDueAt(t) });
+  }
+  if (req.body.repeat !== undefined && req.body.repeat !== t.repeat) {
+    t.repeat = req.body.repeat; t.done = false; t.doneOn = null;
+  }
+  if (typeof req.body.done === 'boolean') {
+    if (t.repeat === 'daily') t.doneOn = req.body.done ? dayKey() : null;
+    else if (t.repeat === 'weekly') t.doneOn = req.body.done ? weekKey() : null;
+    else t.done = req.body.done;
+  }
+  if (typeof req.body.text === 'string' && req.body.text.trim()) t.text = req.body.text.trim().slice(0, 200);
+  if (req.body.priority !== undefined) {
+    t.priority = req.body.priority;
+  }
+  if (req.body.dueAt !== undefined) {
+    const dueAt = validDueAt(req.body.dueAt);
+    t.dueAt = dueAt;
+  }
+  if (req.body.dueTime !== undefined) {
+    t.dueTime = req.body.dueTime || null;
+  }
+  if (req.body.dueWeekday !== undefined) {
+    const weekday = Number(req.body.dueWeekday);
+    t.dueWeekday = weekday;
+  }
+  if (req.body.action === 'up' || req.body.action === 'down') {
+    const ordered = [...db.todos].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    const index = ordered.indexOf(t), next = index + (req.body.action === 'up' ? -1 : 1);
+    if (next >= 0 && next < ordered.length) {
+      [ordered[index], ordered[next]] = [ordered[next], ordered[index]];
+      ordered.forEach((item, pos) => { item.order = pos; });
+    }
+  }
+  await saveDb(); broadcastTodos();
+  res.json({ ...t, done: todoDone(t), dueAt: todoDueAt(t) });
 }));
 app.delete('/api/todos/:id', adminAuth, mutation(async (req, res) => {
   db.todos = db.todos.filter(x => x.id !== req.params.id);
-  await saveDb(); broadcast('todos', db.todos);
+  await saveDb(); broadcastTodos();
   res.json({ ok: true });
+}));
+
+// ---- Pinned note and repeating checklists ----
+function routinesForClient() {
+  return db.routines.map(r => ({ ...r, items: r.items.map(item => ({
+    ...item, done: item.doneOn === (r.repeat === 'weekly' ? weekKey() : dayKey())
+  })) }));
+}
+function broadcastRoutines() { broadcast('routines', routinesForClient()); }
+app.get('/api/note', (req, res) => res.json(db.note));
+app.post('/api/note', adminAuth, mutation(async (req, res) => {
+  if (typeof req.body?.text !== 'string' || req.body.text.length > 1000) return res.status(400).json({ error: 'Note must be at most 1000 characters' });
+  db.note = { text: req.body.text.trim(), updatedAt: Date.now() };
+  await saveDb(); broadcast('note', db.note); res.json(db.note);
+}));
+app.get('/api/routines', (req, res) => res.json(routinesForClient()));
+app.post('/api/routines', adminAuth, mutation(async (req, res) => {
+  const name = req.body?.name;
+  if (typeof name !== 'string' || !name.trim() || name.length > 80) return res.status(400).json({ error: 'Name required, maximum 80 characters' });
+  if (req.body.repeat !== undefined && !['daily', 'weekly'].includes(req.body.repeat)) return res.status(400).json({ error: 'Invalid repeat' });
+  if (db.routines.length >= 10) return res.status(409).json({ error: 'Routine limit reached (10); delete one first' });
+  const routine = { id: crypto.randomUUID(), name: name.trim(), repeat: req.body.repeat === 'weekly' ? 'weekly' : 'daily', items: [] };
+  db.routines.push(routine); await saveDb(); broadcastRoutines(); res.json(routine);
+}));
+app.patch('/api/routines/:id', adminAuth, mutation(async (req, res) => {
+  const routine = db.routines.find(r => r.id === req.params.id);
+  if (!routine) return res.status(404).json({ error: 'Routine not found' });
+  if (req.body.repeat !== undefined && !['daily', 'weekly'].includes(req.body.repeat)) return res.status(400).json({ error: 'Invalid repeat' });
+  if (req.body.name !== undefined) {
+    const name = req.body.name;
+    if (typeof name !== 'string' || !name.trim() || name.length > 80) return res.status(400).json({ error: 'Name required, maximum 80 characters' });
+    routine.name = name.trim();
+  }
+  if (req.body.repeat !== undefined) {
+    if (routine.repeat !== req.body.repeat) routine.items.forEach(item => { item.doneOn = null; });
+    routine.repeat = req.body.repeat;
+  }
+  await saveDb(); broadcastRoutines(); res.json(routine);
+}));
+app.delete('/api/routines/:id', adminAuth, mutation(async (req, res) => {
+  const before = db.routines.length;
+  db.routines = db.routines.filter(r => r.id !== req.params.id);
+  if (db.routines.length === before) return res.status(404).json({ error: 'Routine not found' });
+  await saveDb(); broadcastRoutines(); res.json({ ok: true });
+}));
+app.post('/api/routines/:id/items', adminAuth, mutation(async (req, res) => {
+  const routine = db.routines.find(r => r.id === req.params.id);
+  if (!routine) return res.status(404).json({ error: 'Routine not found' });
+  const text = req.body?.text;
+  if (typeof text !== 'string' || !text.trim() || text.length > 120) return res.status(400).json({ error: 'Text required, maximum 120 characters' });
+  if (routine.items.length >= 20) return res.status(409).json({ error: 'Step limit reached (20); delete one first' });
+  const item = { id: crypto.randomUUID(), text: text.trim(), doneOn: null };
+  routine.items.push(item); await saveDb(); broadcastRoutines(); res.json(item);
+}));
+app.patch('/api/routines/:id/items/:itemId', adminAuth, mutation(async (req, res) => {
+  const routine = db.routines.find(r => r.id === req.params.id);
+  const item = routine?.items.find(i => i.id === req.params.itemId);
+  if (!item) return res.status(404).json({ error: 'Step not found' });
+  if (req.body.text !== undefined && (typeof req.body.text !== 'string' || !req.body.text.trim() || req.body.text.length > 120)) return res.status(400).json({ error: 'Text required' });
+  if (req.body.done !== undefined && typeof req.body.done !== 'boolean') return res.status(400).json({ error: 'Invalid completion' });
+  if (typeof req.body.done === 'boolean') item.doneOn = req.body.done ? (routine.repeat === 'weekly' ? weekKey() : dayKey()) : null;
+  if (req.body.text !== undefined) {
+    const value = String(req.body.text).trim().slice(0, 120);
+    if (!value) return res.status(400).json({ error: 'Text required' });
+    item.text = value;
+  }
+  await saveDb(); broadcastRoutines(); res.json(item);
+}));
+app.delete('/api/routines/:id/items/:itemId', adminAuth, mutation(async (req, res) => {
+  const routine = db.routines.find(r => r.id === req.params.id);
+  if (!routine) return res.status(404).json({ error: 'Routine not found' });
+  routine.items = routine.items.filter(i => i.id !== req.params.itemId);
+  await saveDb(); broadcastRoutines(); res.json({ ok: true });
+}));
+
+// ---- Display preferences and portable user data ----
+function cleanDisplay(input) { return features.cleanDisplay(input, db.display, true); }
+app.get('/api/display', (req, res) => res.json(db.display));
+app.post('/api/display', adminAuth, mutation(async (req, res) => {
+  let display;
+  try { display = cleanDisplay(req.body || {}); } catch (e) { return res.status(400).json({ error: e.message }); }
+  db.display = display;
+  await saveDb(); broadcast('display', db.display); broadcast('calendar', calendarState());
+  res.json(db.display);
+}));
+app.get('/api/export', adminAuth, (req, res) => {
+  res.set('Content-Disposition', 'attachment; filename="tablet-dashboard-export.json"');
+  res.json({ format: 'tablet-dashboard-v2', exportedAt: new Date().toISOString(),
+    todos: [...db.todos].sort((a,b) => a.order - b.order), timers: db.timers, display: db.display, note: db.note, routines: db.routines });
+});
+app.post('/api/import', adminAuth, mutation(async (req, res) => {
+  let imported;
+  try { imported = features.importData(req.body, db, TIME_ZONE); }
+  catch (e) { return res.status(400).json({ error: e.message }); }
+  Object.assign(db, imported);
+  await saveDb();
+  broadcastTodos(); broadcast('timers', sortTimers(db.timers));
+  broadcast('note', db.note); broadcastRoutines();
+  broadcast('display', db.display); broadcast('calendar', calendarState());
+  res.json({ ok: true, todos: db.todos.length, timers: db.timers.length });
 }));
 
 // ---- Timers (multiple, each with a name) ----
@@ -326,6 +533,7 @@ app.post('/api/timers', adminAuth, mutation(async (req, res) => {
   const extra = {};
   try {
     if (type === 'long') targetAt = longTarget(b);
+    else if (b.targetAt !== undefined) { targetAt = time.numeric(b.targetAt); if (targetAt <= Date.now() || !Number.isFinite(new Date(targetAt).getTime())) throw new Error('Choose a future end time'); extra.durationSec = Math.round((targetAt - Date.now()) / 1000); }
     else if (b.atTime !== undefined) targetAt = time.nextClock(b.atTime, TIME_ZONE);
     else { extra.durationSec = time.duration(b); targetAt = time.durationTarget(extra.durationSec); }
   } catch (e) { return res.status(400).json({ error: e.message }); }
@@ -345,6 +553,13 @@ app.patch('/api/timers/:id', adminAuth, mutation(async (req, res) => {
   if (b.action === 'restart' && (b.hours !== undefined || b.mins !== undefined)) {
     try { time.duration(b); } catch(e) { return res.status(400).json({ error: e.message }); }
   }
+  if (b.targetAt !== undefined) {
+    let target;
+    try { target = features.dueAt(b.targetAt, TIME_ZONE); if (!Number.isFinite(target) || target <= Date.now() || !Number.isFinite(new Date(target).getTime())) throw new Error('Choose a future end time'); }
+    catch (e) { return res.status(400).json({ error: e.message }); }
+    t.targetAt = target; t.pausedLeftSec = null; t.createdAt = Date.now(); t.done = false;
+    if (t.type === 'short') t.durationSec = Math.round((target - t.createdAt) / 1000);
+  }
   if (typeof b.name === 'string' && b.name.trim()) t.name = b.name.trim().slice(0, 60);
   if (typeof b.done === 'boolean') t.done = b.done;
   if (typeof b.color !== 'undefined') t.color = cleanColor(b.color);
@@ -352,7 +567,9 @@ app.patch('/api/timers/:id', adminAuth, mutation(async (req, res) => {
     t.pausedLeftSec = Math.max(0, Math.round((t.targetAt - Date.now()) / 1000));
     t.targetAt = null;
   } else if (b.action === 'resume' && t.pausedLeftSec != null) {
-    t.targetAt = Date.now() + t.pausedLeftSec * 1000; t.pausedLeftSec = null;
+    try { t.targetAt = features.remainingTarget(t.pausedLeftSec); }
+    catch (e) { return res.status(400).json({ error: e.message }); }
+    t.pausedLeftSec = null;
   } else if (b.action === 'reset') {
     t.targetAt = null; t.pausedLeftSec = null; t.done = false;
   } else if (b.action === 'restart' && t.targetAt == null && t.pausedLeftSec == null) {
@@ -399,7 +616,10 @@ app.post('/api/timers/short', adminAuth, mutation(async (req, res) => {
     s.pausedLeftSec = Math.max(0, Math.round((s.targetAt - Date.now()) / 1000));
     s.targetAt = null;
   } else if (action === 'resume' && s.pausedLeftSec != null) {
-    s.targetAt = Date.now() + s.pausedLeftSec * 1000; s.pausedLeftSec = null;
+    let targetAt;
+    try { targetAt = features.remainingTarget(s.pausedLeftSec); }
+    catch (e) { return res.status(400).json({ error: e.message }); }
+    s.targetAt = targetAt; s.pausedLeftSec = null;
   } else if (action === 'reset') {
     s.targetAt = null; s.pausedLeftSec = null;
   } else return res.status(400).json({ error: 'bad action' });
@@ -425,13 +645,17 @@ function refreshWeather() {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
     try {
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${WEATHER_LAT}&longitude=${WEATHER_LON}&current=temperature_2m,weather_code&timezone=${encodeURIComponent(TIME_ZONE)}`;
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${WEATHER_LAT}&longitude=${WEATHER_LON}&current=temperature_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&forecast_days=1&timezone=${encodeURIComponent(TIME_ZONE)}`;
       const r = await fetchImpl(url, { signal: controller.signal });
       if (!r.ok) throw new Error('HTTP '+r.status);
       const j = await r.json();
       if (!j.current || typeof j.current.temperature_2m !== 'number' || !Number.isFinite(j.current.temperature_2m) || typeof j.current.weather_code !== 'number' || !Number.isFinite(j.current.weather_code)) throw new Error('Invalid weather sample');
       const [label, icon] = WEATHER_META[j.current.weather_code] || ['—', '🌡️'];
-      db.weather = {temp:Math.round(j.current.temperature_2m),code:j.current.weather_code,label,icon,updatedAt:Date.now(),attemptedAt:Date.now(),error:null};
+      const dailyNumber = (values, min, max) => typeof values?.[0] === 'number' && Number.isFinite(values[0]) && values[0] >= min && values[0] <= max ? Math.round(values[0]) : null;
+      db.weather = {temp:Math.round(j.current.temperature_2m),code:j.current.weather_code,label,icon,
+        isDay: j.current.is_day === 1 ? true : j.current.is_day === 0 ? false : null,
+        high: dailyNumber(j.daily?.temperature_2m_max, -100, 70), low: dailyNumber(j.daily?.temperature_2m_min, -100, 70),
+        rainChance: dailyNumber(j.daily?.precipitation_probability_max, 0, 100), updatedAt:Date.now(),attemptedAt:Date.now(),error:null};
     } catch(e) {
       db.weather = { ...db.weather, attemptedAt:Date.now(), error:'Weather refresh failed; retrying automatically' };
     } finally { clearTimeout(timeout); }
@@ -469,7 +693,12 @@ app.post('/api/time', adminAuth, mutation(async (req, res) => {
 }));
 // ---- Google Calendar via private ICS URL (poll every 10 min) ----
 let calendarGeneration = 0;
-function calendarState() { return { ...db.calendar, stale: !!db.calendar.configured && (!db.calendar.updatedAt || Date.now()-db.calendar.updatedAt > 20*60000) }; }
+function calendarState() {
+  const state = { ...db.calendar, stale: !!db.calendar.configured && (!db.calendar.updatedAt || Date.now()-db.calendar.updatedAt > 20*60000) };
+  if (!db.display.privacy) return state;
+  const redact = event => event ? { ...event, summary: 'Private event', location: '' } : null;
+  return { ...state, next: redact(state.next), upcoming: state.upcoming.map(redact) };
+}
 async function refreshCalendar() {
   const generation = ++calendarGeneration;
   const url = (db.settings.icsUrl || '').trim();
@@ -530,6 +759,7 @@ function longTarget(body) {
 }
 app.use((error,req,res,next) => {
   console.error('request failed:', error.message);
+  if (!res.headersSent && error.storageCommitted) return res.status(503).json({ error: 'Changes were written but durability could not be confirmed; reload before retrying', saveState: 'uncertain' });
   if (!res.headersSent) res.status(error.status || 500).json({ error: error.status === 400 ? 'Invalid request body' : 'Unable to save changes; please retry' });
 });
 function startBackground() {
@@ -537,6 +767,8 @@ function startBackground() {
   ready.then(() => { refreshWeather(); refreshCalendar(); }).catch(e => console.error('startup persistence failed:', e.message));
   every(() => transaction(saveDb).catch(e => console.error('database save failed:', e.message)), 15000);
   every(refreshWeather, 30 * 60000);
+  every(rolloverTodos, 60000);
+  every(() => { if (media.updatedAt && !media.expired && mediaState().stale) { media.expired = true; broadcast('media', mediaState()); } }, 1000);
   every(refreshCalendar, 10 * 60000);
   every(() => { for (const res of sseClients) res.write(': heartbeat\n\n'); }, 25000);
 }

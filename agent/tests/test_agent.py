@@ -36,6 +36,10 @@ class WindowsRegressionTests(unittest.TestCase):
 
 class SharedAgentTests(unittest.TestCase):
     def setUp(self):
+        # Startup tests must never read a user's agent/.env.
+        env_loader = patch.object(telemetry, 'load_env')
+        env_loader.start()
+        self.addCleanup(env_loader.stop)
         self.hardware = Mock()
         self.hardware.cpu_percent.return_value = 21.5
         self.hardware.virtual_memory.return_value = NS(percent=42)

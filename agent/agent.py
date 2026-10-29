@@ -1,8 +1,12 @@
 """Windows entrypoint. Run: python agent/agent.py (SERVER and INTERVAL env vars)."""
 if __package__:
-    from .telemetry import main, probe_gpu
+    from .telemetry import main as telemetry_main, probe_gpu
 else:
-    from telemetry import main, probe_gpu
+    from telemetry import main as telemetry_main, probe_gpu
+
+
+def main():
+    return telemetry_main(windows_media=True)
 
 
 def gpu_pct():

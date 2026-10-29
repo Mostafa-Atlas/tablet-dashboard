@@ -6,6 +6,7 @@ services:
     environment:
       PORT: "1200"
       DATA_DIR: /data
+      PC_ALLOW_IP: "${PC_ALLOW_IP:-192.168.50.2}"
       APP_TIMEZONE: "${APP_TIMEZONE:-Africa/Cairo}"
       WEATHER_LAT: "${WEATHER_LAT:-29.9668}"
       WEATHER_LON: "${WEATHER_LON:-30.9333}"
